@@ -1,4 +1,4 @@
-function SimMEEG_GUI_v21a(varargin)
+function SimMEEG_GUI(varargin)
 %% GUI for user-friendly selection of parameters needed to run SimSignals.m
 %    varagin = bst structure called directly from Brainstorm see "sm_bst2ft_anatomy_from_bst_files" for input structure
 %
