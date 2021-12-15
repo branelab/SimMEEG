@@ -88,7 +88,7 @@ if h.license_flag==1
     ft_defaults;
     cd(h.pwd);
     % Field Trip's external directory with filtfilt messes up BRANE Lab's filter_data_new.m function so need to remove this directory for filtering function
-    h.FieldTrip_dir_external = genpath([ h.FieldTrip_dir,'\external\']);
+    h.FieldTrip_dir_external = genpath(fullfile(h.FieldTrip_dir, 'external'));
     rmpath(h.FieldTrip_dir_external);
     
     %% Initializing UserData
