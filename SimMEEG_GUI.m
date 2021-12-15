@@ -63,7 +63,20 @@ end
 h.license_flag = 0;
 sm_popup_license_terms;
 
-if h.license_flag==1
+% Check for needed Matlab 
+toolboxes_required = {'Curve Fitting Toolbox', 'Signal Processing Toolbox'};
+ver_tmp = ver;
+toolboxes_installed = {ver_tmp.Name};
+toolboxes_missing = not(ismember(toolboxes_required, toolboxes_installed));
+for ix = 1 : length(toolboxes_missing)
+    if toolboxes_missing(ix)
+        error(['Required Matlab Toolbox: "', ...
+               toolboxes_required{ix}, ...
+               '" is not installed.']);
+    end
+end
+
+if h.license_flag==1 || any(toolboxes_missing) 
     %% %%%%%%%%%%%%%%%%%%%%%%%%%%% Adding paths %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     h.pwd=pwd;
     %% User-defined or Brainstorm paths
@@ -87,9 +100,6 @@ if h.license_flag==1
     cd(h.FieldTrip_dir); %C:\BRANELab\Software\BRANE_Lab_v3\fieldtrip-20200519\;
     ft_defaults;
     cd(h.pwd);
-    % Field Trip's external directory with filtfilt messes up BRANE Lab's filter_data_new.m function so need to remove this directory for filtering function
-    h.FieldTrip_dir_external = genpath(fullfile(h.FieldTrip_dir, 'external'));
-    rmpath(h.FieldTrip_dir_external);
     
     %% Initializing UserData
     h.UserData.bkg_clr = [1 1 1];    % background color
