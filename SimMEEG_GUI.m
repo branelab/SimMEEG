@@ -96,10 +96,6 @@ if h.license_flag==1 || any(toolboxes_missing)
         h.FieldTrip_dir = uigetdir(h.pwd,'Open Field Trip Directory');
         h.bst_subj_data_dir ='';
     end
-    %% Adding FieldTrip paths
-    cd(h.FieldTrip_dir); %C:\BRANELab\Software\BRANE_Lab_v3\fieldtrip-20200519\;
-    ft_defaults;
-    cd(h.pwd);
     
     %% Initializing UserData
     h.UserData.bkg_clr = [1 1 1];    % background color
