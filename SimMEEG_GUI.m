@@ -90,11 +90,18 @@ if h.license_flag==1 || any(toolboxes_missing)
             h.anat_path = uigetdir(h.pwd,'Set Anatomy Directory');
             h.FieldTrip_dir = uigetdir(h.pwd,'Open Field Trip Directory');
         end
+        % FieldTrip defaults are handled by Brainstorm
     else                                                                % User-defined paths
         h.data_dir = uigetdir(h.pwd,'Set Data Directory');
         h.anat_path = uigetdir(h.pwd,'Set Anatomy Directory');
         h.FieldTrip_dir = uigetdir(h.pwd,'Open Field Trip Directory');
         h.bst_subj_data_dir ='';
+        % FieldTrip defaults
+        global ft_default
+        ft_default.toolbox.signal = 'matlab'; %Use Matlab's Signal Processing Toolbox
+        cd(h.FieldTrip_dir);
+        ft_defaults
+        cd(h.pwd);
     end
     
     %% Initializing UserData
