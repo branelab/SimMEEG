@@ -2,9 +2,12 @@ function sm_calc_PLV_PLI(varargin)
 % This program used matlab's "cwt.m" --> future versions will incorporate "ft_freqanalysis.m" because it has a lot more functionality and evidence for use with M/EEG
 %
 %
-
 global h
 
+% initialize variables
+plv_surg_based_mean =[]; plv_surg_based_std=[]; pli_surg_based_mean =[]; pli_surg_based_std=[]; dpli_surg_based_mean=[]; dpli_surg_based_std=[];
+
+% run program
 calc_flag=0;
 if isfield(h.inv_soln(h.current_inv_soln),'TFR_results') 
     if isempty(h.inv_soln(h.current_inv_soln).TFR_results)
@@ -297,6 +300,7 @@ if calc_flag==1
         
     end
     delete(hw);
+    
     h.inv_soln(h.current_inv_soln).TFR_results.plv_surg_based_mean = plv_surg_based_mean; clear plv_surg_based_mean;
     h.inv_soln(h.current_inv_soln).TFR_results.plv_surg_based_std = plv_surg_based_std; clear plv_surg_based_std;
     h.inv_soln(h.current_inv_soln).TFR_results.pli_surg_based_mean = pli_surg_based_mean; clear pli_surg_based_mean
