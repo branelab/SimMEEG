@@ -63,6 +63,25 @@ end
 h.license_flag = 0;
 sm_popup_license_terms;
 
+% Check for needed Matlab 
+toolboxes_required = {'Curve Fitting Toolbox', ...
+                      'Signal Processing Toolbox', ...
+                      'Parallel Computing Toolbox', ...
+                      'Wavelet Toolbox', ...
+                      'Statistics Toolbox'};
+ver_tmp = ver;
+toolboxes_installed = {ver_tmp.Name};
+toolboxes_missing = not(ismember(toolboxes_required, toolboxes_installed));
+error_str = '';
+for ix = 1 : length(toolboxes_missing)
+    if toolboxes_missing(ix)
+        error_str = [error_str, sprintf('Required Matlab Toolbox: "%s" is not installed.\n', toolboxes_required{ix})];
+    end
+end
+if ~isempty(error_str)
+    error(error_str);
+end
+
 if h.license_flag==1
     %% %%%%%%%%%%%%%%%%%%%%%%%%%%% Adding paths %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     h.pwd=pwd;
@@ -77,19 +96,19 @@ if h.license_flag==1
             h.anat_path = uigetdir(h.pwd,'Set Anatomy Directory');
             h.FieldTrip_dir = uigetdir(h.pwd,'Open Field Trip Directory');
         end
+        % FieldTrip defaults are handled by Brainstorm
     else                                                                % User-defined paths
         h.data_dir = uigetdir(h.pwd,'Set Data Directory');
         h.anat_path = uigetdir(h.pwd,'Set Anatomy Directory');
         h.FieldTrip_dir = uigetdir(h.pwd,'Open Field Trip Directory');
         h.bst_subj_data_dir ='';
+        % FieldTrip defaults
+        global ft_default
+        ft_default.toolbox.signal = 'matlab'; %Use Matlab's Signal Processing Toolbox
+        cd(h.FieldTrip_dir);
+        ft_defaults
+        cd(h.pwd);
     end
-    %% Adding FieldTrip paths
-    cd(h.FieldTrip_dir); %C:\BRANELab\Software\BRANE_Lab_v3\fieldtrip-20200519\;
-    ft_defaults;
-    cd(h.pwd);
-    % Field Trip's external directory with filtfilt messes up BRANE Lab's filter_data_new.m function so need to remove this directory for filtering function
-    h.FieldTrip_dir_external = genpath([ h.FieldTrip_dir,'\external\']);
-    rmpath(h.FieldTrip_dir_external);
     
     %% Initializing UserData
     h.UserData.bkg_clr = [1 1 1];    % background color

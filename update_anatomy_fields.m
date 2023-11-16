@@ -55,7 +55,7 @@ if ~isfield(h.anatomy.leadfield,'ori')    % cortical surface leadfields exist
     h.menu_head_model.Enable = 'on'; %h.menu_inv_headmodel.Enable = 'on';
     h.menu_head_model.BackgroundColor = [1 1 1];  h.menu_head_model.ForegroundColor = [1 1 1]*0;
     h.pwd = pwd;
-    cd(fullfile(h.FieldTrip_dir,'private\'));
+    cd(fullfile(h.FieldTrip_dir,'private'));
     h.anatomy.leadfield_eeg_cortex.ori = normals(h.anatomy.mesh_cortex.pos,h.anatomy.mesh_cortex.tri,'vertex'); % finding orientations normalized to cortical surface "cortically contrained"
     cd(h.pwd);
 % else
