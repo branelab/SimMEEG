@@ -64,19 +64,25 @@ h.license_flag = 0;
 sm_popup_license_terms;
 
 % Check for needed Matlab 
-toolboxes_required = {'Curve Fitting Toolbox', 'Signal Processing Toolbox'};
+toolboxes_required = {'Curve Fitting Toolbox', ...
+                      'Signal Processing Toolbox', ...
+                      'Parallel Computing Toolbox', ...
+                      'Wavelet Toolbox', ...
+                      'Statistics Toolbox'};
 ver_tmp = ver;
 toolboxes_installed = {ver_tmp.Name};
 toolboxes_missing = not(ismember(toolboxes_required, toolboxes_installed));
+error_str = '';
 for ix = 1 : length(toolboxes_missing)
     if toolboxes_missing(ix)
-        error(['Required Matlab Toolbox: "', ...
-               toolboxes_required{ix}, ...
-               '" is not installed.']);
+        error_str = [error_str, sprintf('Required Matlab Toolbox: "%s" is not installed.\n', toolboxes_required{ix})];
     end
 end
+if ~isempty(error_str)
+    error(error_str);
+end
 
-if h.license_flag==1 || any(toolboxes_missing) 
+if h.license_flag==1
     %% %%%%%%%%%%%%%%%%%%%%%%%%%%% Adding paths %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     h.pwd=pwd;
     %% User-defined or Brainstorm paths
