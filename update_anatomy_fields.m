@@ -33,7 +33,6 @@ catch
      h.mri_path.String = ' ';
 end
 
-
 %% Sensor String
 if ~isempty(h.anatomy.leadfield) && ~isempty(h.anatomy.sens)
     h.sensors_txt.String = sprintf('%.f sensors (%s) with %.f used for leadfield',size(h.anatomy.sens.chanpos,1),h.anatomy.sens.type,size(h.anatomy.leadfield.H,1));
@@ -179,4 +178,23 @@ if ~isempty(h.anatomy.sens_eeg)
     end
     h.listbox_monte_EEG_sens_montage.String = num2str(sens_num');
 end
+
+
+%% Update Headmodel Menu
+hdm_name = {'vol' 'cortex' 'spheres_cortex' 'spheres_vol'};
+hdm_flag = false(length(hdm_name),1);
+for a=1:length(hdm_name)
+    hdm = sprintf('headmodel_%s_%s', h.anatomy.sens.type, hdm_name{a});
+    fn = fieldnames(h.anatomy); fn = fn(contains(fn,hdm));
+    for f=1:length(fn)
+        if ~isempty(h.anatomy.(fn{f}))
+            hdm_flag(a) = true;
+        end
+    end
+end
+hdm_string = {"Volume" "Cortical Surface" "Spheres(Volume)" "Spheres(Cortical)"}; 
+h.menu_head_model.String = hdm_string(hdm_flag);
+
+
+
 

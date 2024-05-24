@@ -301,7 +301,7 @@ if length(h.anatomy.mesh_volumes)>3
 else
     h.anatomy.mesh_cortex = h.anatomy.mesh_volumes(3);
 end
-update_anatomy_fields;
 
+update_anatomy_fields;
 
 end

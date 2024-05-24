@@ -147,17 +147,17 @@ else
         %% Finding PLV phases for each 3sigs
         fprintf('\n %%%% Finding Signal Phases %%%%\n');
         %          [sig_phase(:,:,f),cfg.source.sig_PLV_trials_est(:,f), cfg.source.sig_PLV_evoked_est(:,f)]=bl_find_PLV_phases(sig_PLV_targets(:,f),sig_evoked_perc(:,f),num_trials,plv_thresh,num_iter);
-       try
+       % try
        [sig_phase(:,:,f),cfg.source.sig_PLV_trials_est(:,f), cfg.source.sig_PLV_evoked_est(:,f), cfg.source.sig_PLI_trials_est(:,f),cfg.source.sig_dPLI_trials_est(:,f)]=bl_find_PLV_phases_v2(cfg.source.sig_PLV_targets(:,f),cfg.source.sig_evoked_perc(:,f)/100,cfg.source.sig_PLI_targets(:,f),cfg.source.sig_phase_lag(:,f),cfg.study.num_trials,cfg.study.plv_thresh,cfg.study.max_perm_plv);
         fprintf('\n %%%% Finding PrePost Phases %%%%\n');
         %           [prepost_phase(:,:,f),cfg.source.prepost_PLV_trials_est(:,f), cfg.source.prepost_PLV_evoked_est(:,f)]=bl_find_PLV_phases(prepost_PLV_targets(:,f),prepost_evoked_perc(:,f),num_trials,plv_thresh,num_iter);
         [prepost_phase(:,:,f),cfg.source.prepost_PLV_trials_est(:,f), cfg.source.prepost_PLV_evoked_est(:,f), cfg.source.prepost_PLI_trials_est(:,f),cfg.source.prepost_dPLI_trials_est(:,f)]=bl_find_PLV_phases_v2(cfg.source.prepost_PLV_targets(:,f),cfg.source.prepost_evoked_perc(:,f)/100,cfg.source.prepost_PLI_targets(:,f),cfg.source.prepost_phase_lag(:,f),cfg.study.num_trials,cfg.study.plv_thresh,cfg.study.max_perm_plv);
         cfg.sig_phase=sig_phase; cfg.prepost_phase=prepost_phase;
-       catch
-           warndlg('Simulation Failed. Please see pop-up error messages');
-           fprintf('Simulation Failed. Please see pop-up error messages\n');
-           return
-       end
+       % catch
+       %     warndlg('Simulation Failed. Please see pop-up error messages');
+       %     fprintf('Simulation Failed. Please see pop-up error messages\n');
+       %     return
+       % end
         for v=1:num_chans
             clear hwin hwin3 dur_samps win_samps han_win1
             %% Signal Interval Sine Waves with windowing

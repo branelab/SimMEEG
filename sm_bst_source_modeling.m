@@ -138,5 +138,6 @@ isDeleted = file_delete( dfiles, 1, -1 );
 % isDeleted = file_delete( dfiles, 1, -1 );
 
 % update 
-db_reload_studies(1:h.bst.iStudy)
+% db_reload_studies(1:h.bst.iStudy)
+db_reload_studies(h.bst.iStudy)
 

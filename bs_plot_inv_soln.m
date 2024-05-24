@@ -2,6 +2,7 @@ function bs_plot_inv_soln(varargin)
 global h
 
 h.panel_3D_image_plot_msg.Visible = 'on'; drawnow;
+% if h.current_inv_soln>size(h.inv_soln,2); h.current_inv_soln=size(h.inv_soln,2); end
 h.panel_3D_image_plot_msg_txt.String = sprintf('%s\nRegular mapping',h.inv_soln(h.current_inv_soln).Type);
 
 %% Resetting current_peak...

@@ -70,7 +70,7 @@ function SimMEEG_GUI(varargin)
 %   	Aslo, project sim_data.noise_wav to sensor space to yield "source_noise"
 %
 
-version_num = '2.4e';
+version_num = '2.4d';
 
 % hm = warndlg(sprintf('This version is to be used only by Alex Moiseev and Tony Herdman!\n\nYou are viloating Intellectual Property Rights if you are not either of these persons.\n\n'));
 % waitfor(hm);
@@ -100,8 +100,12 @@ for vi = 1:length(varargin)
     if isfield(varargin{1},'subj_MriFile')
         bst = varargin{vi};
         
-        if isfield(bst,'new_bst_simmeeg_installed')
-        
+        if ~isfield(bst,'simmeeg_v24d')
+            warndlg(sprintf('New "bst_simmeeg.m" was needed to be installed.\nPlease run SimMEEG again.'),'"bst_simmeeg.m" Update')
+            fname = which('bst_simmeeg_new.m');
+            cname = which('bst_simmeeg.m');
+            copyfile(fname, cname)
+            return
         end
         
         
@@ -240,7 +244,7 @@ if h.license_flag==1
    
     %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% MAIN Figure %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    h.main_fig = figure; set(h.main_fig,'Units','normalized','Position',[.05 .05 .85 .85],'Name',sprintf('BRANE Lab: SimMEEG v%.1f',version_num),'NumberTitle','off');
+    h.main_fig = figure; set(h.main_fig,'Units','normalized','Position',[.05 .05 .85 .85],'Name',sprintf('SimMEEG v%.1f',version_num),'NumberTitle','off');
     addToolbarExplorationButtons(h.main_fig) % Adds zoom, rotate, ... buttons to figure toolbar
     h.main_fig.CloseRequestFcn = @closereq_SimMEEG;
     h.main_fig.Name = sprintf('BRANE Lab: SimMEEG v%s',version_num); 
@@ -283,7 +287,7 @@ if h.license_flag==1
         'FontSize',10,'HorizontalAlignment','left','String','SNR (dB)');
     h.edit_sens_SNR = uicontrol(h.study_panel,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
         'Position',[h.ui_clmn_pos(1) h.txt_row_pos(4) h.ui_length h.ui_height],...
-        'FontSize',8,'HorizontalAlignment','center','String','-4','Value',1,'Tooltip',sprintf('SNR (dB) = 20*log10(signal/noise))\n where\n "signal" is RMS of post-event interval \n "noise" is the RMS of the baseline interval'));
+        'FontSize',8,'HorizontalAlignment','center','String','-2','Value',1,'Tooltip',sprintf('SNR (dB) = 20*log10(signal/noise))\n where\n "signal" is RMS of post-event interval \n "noise" is the RMS of the baseline interval'));
     %% Noise Amplitude Percent
     h.edit_noise_amp_perc_txt = uicontrol(h.study_panel,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
         'Position',[h.txt_clmn_pos(2) h.txt_row_pos(2) h.txt_length h.ui_height],...
@@ -470,20 +474,20 @@ if h.license_flag==1
     h.sig_ypos=.3; h.sig_pos_size=[.265 .2];
     h.prepost_ypos=.05;
     h.source_edit_length = .035; h.source_edit_height = .03; h.source_edit_ypos  = [.92 .88];
-    %% Source Triplets
+    %% Source Triplets - Visible 'Off" to be added in future versions
     % delete(h.menu_triplets_txt); delete(h.menu_triplets); 
-    h.menu_triplets_txt = uicontrol(h.tab_power,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+    h.menu_triplets_txt = uicontrol(h.tab_power,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize','Visible','off',...
         'Position',[.005 .965 .0275 .03],'FontSize',10,'HorizontalAlignment','right','String','Triplets');
-    h.menu_triplets = uicontrol(h.tab_power,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize',...
+    h.menu_triplets = uicontrol(h.tab_power,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize','Visible','off',...
         'Position',[.035 .968 .045 .03],'FontSize',8,'HorizontalAlignment','center','String',{'1'},'Value',1,'Callback',{@update_triplet,'update'});
     %% Button Add & Delete triplets
     % delete(h.btn_add_triplets);
     h.btn_add_triplets = uicontrol(h.tab_power,'BackgroundColor',[1 1 1]*.9,'ForegroundColor',h.src_clr(1,:),'Style','pushbutton','Units','normalize',...
-        'Position',[0.005 .925 .075 .035],'Visible','on','UserData',1,...
-        'FontSize',10,'HorizontalAlignment','center','String','Add Triplet','Callback',{@update_triplet,'add'});
+        'Position',[0.005 .925 .075 .035],'Visible','off','UserData',1,...
+        'FontSize',10,'HorizontalAlignment','center','String','Copy Triplet','Callback',{@update_triplet,'copy'});
    % delete(h.btn_del_triplets);
-    h.btn_del_triplets = uicontrol(h.tab_power,'BackgroundColor',[1 1 1]*.9,'ForegroundColor','r','Style','pushbutton','Units','normalize',...
-        'Position',[0.005 .885 .075 .035],'Visible','on','UserData',1,...
+    h.btn_del_triplets = uicontrol(h.tab_power,'BackgroundColor',[1 1 1]*.9,'ForegroundColor','r','Style','pushbutton','Units','normalize','Visible','off',...
+        'Position',[0.005 .885 .075 .035],'Visible','off','UserData',1,...
         'FontSize',10,'HorizontalAlignment','center','String','Delete Triplet','Callback',{@update_triplet,'del'});
 
     %% Signal Window Type
@@ -2226,10 +2230,79 @@ function initialize_cfg_source_data(varargin) %% Initializing h.cfg.source data
 global h
 h.num_sig_freqs=1;
 h.cfg.study.source_locs_mm = [ -52    11    57; 3    51    57; 3   -49    57]; %ones(3,3); %[];
-h.cfg.source = source_triplet;
-h.cfg.source.vx_locs = h.cfg.study.source_locs_mm;
+
+%% clear h.cfg.source and initialize
+h.cfg.source = struct('vx_locs'        ,[],...
+    'vx_idx'                          ,[],...
+    'vx_ori'                          ,[],...
+    'vx_amp'                          ,[],...
+    'src_clr'                         ,[],...
+    'sig_freqs'                       ,[],...
+    'sig_amp_perc'                    ,[],...
+    'prepost_amp_perc'                ,[],...
+    'sig_amp_perc_std'                ,[],...
+    'prepost_amp_perc_std'            ,[],...
+    'sig_evoked_perc'                 ,[],...
+    'prepost_evoked_perc'             ,[],...
+    'sig_durs'                        ,[],...
+    'sig_start'                       ,[],...
+    'sig_win_type'                    ,[],...
+    'sig_win_rise_time'               ,[],...
+    'sig_PLV_targets'                 ,[],...
+    'prepost_PLV_targets'             ,[],...
+    'sig_PLI_targets'                 ,[],...
+    'prepost_PLI_targets'             ,[],...
+    'sig_phase_lag'                   ,[],...
+    'prepost_phase_lag'               ,[],...
+    'phase_amp_contrasts'             ,[],...
+    'sig_phase_amp_freq_idx'          ,[],...
+    'prepost_phase_amp_freq_idx'      ,[],...
+    'sig_phase_amp_depth_perc'        ,[],...
+    'prepost_phase_amp_depth_perc'    ,[],...
+    'sig_phase_amp_depth_perc_range'  ,[],...
+    'prepost_phase_amp_depth_perc_range',[]);
+
+for v=1:3
+    h.cfg.source.sig_freqs(v,h.num_sig_freqs,:)             = [0 0];
+    h.cfg.source.sig_amp_perc(v,h.num_sig_freqs)            = 0;
+    h.cfg.source.prepost_amp_perc(v,h.num_sig_freqs)        = 0;
+    h.cfg.source.sig_amp_perc_std(v,h.num_sig_freqs)        = 0;
+    h.cfg.source.prepost_amp_perc_std(v,h.num_sig_freqs)    = 0;
+    h.cfg.source.sig_evoked_perc(v,h.num_sig_freqs)         = 0;
+    h.cfg.source.prepost_evoked_perc(v,h.num_sig_freqs)     = 0;
+    h.cfg.source.sig_durs(v,h.num_sig_freqs)                = 0;
+    h.cfg.source.sig_start(v,h.num_sig_freqs)               = 0;
+    h.cfg.source.sig_win_type(v,h.num_sig_freqs)            = 0;
+    h.cfg.source.sig_win_rise_time(v,h.num_sig_freqs)       = 0;
+    
+    h.cfg.source.sig_PLV_targets(v,h.num_sig_freqs)         = 0;  %(PLV_contrasts x Nfreqs);     % for each signal contrast (1-2, 1-3, 2-3) x Nfreqs.
+    h.cfg.source.prepost_PLV_targets(v,h.num_sig_freqs)     = 0;  %(PLV_contrasts x Nfreqs);     % for each signal contrast (1-2, 1-3, 2-3) x Nfreqs.
+    h.cfg.source.sig_PLI_targets(v,h.num_sig_freqs)         = 0;  %(PLV_contrasts x Nfreqs);     % for each signal contrast (1-2, 1-3, 2-3) x Nfreqs.
+    h.cfg.source.prepost_PLI_targets(v,h.num_sig_freqs)     = 0;  %(PLV_contrasts x Nfreqs);     % for each signal contrast (1-2, 1-3, 2-3) x Nfreqs.
+    h.cfg.source.sig_phase_lag(v,h.num_sig_freqs)           = 0;  % phase-lag (radians; relative to sample(1)) of each 3 signals within the signal interval relative to first sample --> (phase_lag/360)*2*pi);    cos(phase_lag) = correlation of signal relative to zero-phase onset
+    h.cfg.source.prepost_phase_lag(v,h.num_sig_freqs)       = 0;  % phase-lag (radians; relative to sample(1)) of each 3 signals within the signal interval relative to first sample --> (phase_lag/360)*2*pi);    cos(phase_lag) = correlation of signal relative to zero-phase onset
+    h.cfg.source.vx_ori(v,:)                                = [0 0 1];  % source orientations (X, Y, Z)
+    h.cfg.source.vx_idx(v)                                  = 1;    % source's voxel index from leadfield positions
+    h.cfg.source.vx_amp(v)                                  = 60;   % nAmps
+    h.cfg.source.vx_locs(v,:)                               = [0 0 0];   % source locations (X, Y, Z)
+end
 h.cfg.source.src_clr = h.src_clr;
-h.cfg.source.fcn_find_nearest_idx(h.anatomy.leadfield.pos);
+% h.cfg.source.phase_amp_contrasts = []; %[1 2; 1 3; 2 1; 2 3; 3 1; 3 2]; % sig_contrasts = cross-frequency contrasts among 3signals % sig_contrasts=[1 2; 1 3; 2 1; 2 3; 3 1; 3 2]; Note: 1st index is the signal amplitude being modulated by the 2nd signal
+% h.cfg.source.sig_phase_amp_freq_idx = []; % [0 0; 0 0; 0 0 ; 0 0 ; 0 0 ; 0 0]; %(sig_contrasts x Nfreqs);  % cross-frequency contrasts among 3signals % sig_contrasts=[1 2; 1 3; 2 1; 2 3; 3 1; 3 2]; Note: 1st index is the signal amplitude being modulated by the 2nd signal
+% h.cfg.source.prepost_phase_amp_freq_idx = []; % [0 0; 0 0; 0 0 ; 0 0 ; 0 0 ; 0 0 ];   %(PLV_contrasts x Nfreqs);     % cross-frequency contrasts among 3signals % sig_contrasts=[1 2; 1 3; 2 1; 2 3; 3 1; 3 2]; Note: 1st index is the signal amplitude being modulated by the 2nd signal
+% h.cfg.source.sig_phase_amp_depth_perc = []; % [0 0; 0 0; 0 0 ; 0 0 ; 0 0 ; 0 0 ]; % amplitude-modulation depth as a percentage of signal's amplitude (sig_amp_perc) modulated at phase of sig_freq(sig_phase_amp_freq_idx)
+% h.cfg.source.prepost_phase_amp_depth_perc = []; % [0 0; 0 0; 0 0 ; 0 0 ; 0 0 ; 0 0 ]; % depth percentage of prepost's amplitude (prepost_amp_perc) modulated at phase of sig_freq(sig_phase_amp_freq_idx)
+% h.cfg.source.sig_phase_amp_depth_perc_range = []; % [0 0; 0 0; 0 0 ; 0 0 ; 0 0 ; 0 0 ]; % +/- range of depth percentage of prepost's amplitude (prepost_amp_perc) modulated at phase of sig_freq(sig_phase_amp_freq_idx). NOTE: sig_phase_amp_depth_perc +/- sig_phase_amp_depth_perc_range must be within [0 100]
+% h.cfg.source.prepost_phase_amp_depth_perc_range = []; % [0 0; 0 0; 0 0 ; 0 0 ; 0 0 ; 0 0 ]; % +/- range devitaion of depth percentage of prepost's amplitude (prepost_amp_perc) modulated at phase of sig_freq(sig_phase_amp_freq_idx). NOTE: prepost_phase_amp_depth_perc +/- prepost_phase_amp_depth_perc_range must be within [0 100]
+
+%% Initializing PAC matrices
+h.cfg.source.phase_amp_contrasts                        = [1 2; 1 3; 2 1; 2 3; 3 1; 3 2]; % These are fixed --> sig_contrasts = cross-frequency contrasts among 3signals % sig_contrasts=[1 2; 1 3; 2 1; 2 3; 3 1; 3 2]; Note: 1st index is the signal amplitude being modulated by the 2nd signal
+h.cfg.source.sig_phase_amp_freq_idx                     = zeros(size(h.cfg.source.phase_amp_contrasts,1), 1); %[0 0; 0 0; 0 0 ; 0 0 ; 0 0 ; 0 0 ]; %(sig_contrasts x Nfreqs);  % cross-frequency contrasts among 3signals % sig_contrasts=[1 2; 1 3; 2 1; 2 3; 3 1; 3 2]; Note: 1st index is the signal amplitude being modulated by the 2nd signal
+h.cfg.source.prepost_phase_amp_freq_idx                 = zeros(size(h.cfg.source.phase_amp_contrasts,1), 1);   %(PLV_contrasts x Nfreqs);     % cross-frequency contrasts among 3signals % sig_contrasts=[1 2; 1 3; 2 1; 2 3; 3 1; 3 2]; Note: 1st index is the signal amplitude being modulated by the 2nd signal
+h.cfg.source.sig_phase_amp_depth_perc                   = h.cfg.source.sig_phase_amp_freq_idx; % amplitude-modulation depth as a percentage of signal's amplitude (sig_amp_perc) modulated at phase of sig_freq(sig_phase_amp_freq_idx)
+h.cfg.source.prepost_phase_amp_depth_perc               = h.cfg.source.sig_phase_amp_freq_idx; % depth percentage of prepost's amplitude (prepost_amp_perc) modulated at phase of sig_freq(sig_phase_amp_freq_idx)
+h.cfg.source.sig_phase_amp_depth_perc_range             = h.cfg.source.sig_phase_amp_freq_idx; % +/- range of depth percentage of prepost's amplitude (prepost_amp_perc) modulated at phase of sig_freq(sig_phase_amp_freq_idx). NOTE: sig_phase_amp_depth_perc +/- sig_phase_amp_depth_perc_range must be within [0 100]
+h.cfg.source.prepost_phase_amp_depth_perc_range         = h.cfg.source.sig_phase_amp_freq_idx; % +/- range devitaion of depth percentage of prepost's amplitude (prepost_amp_perc) modulated at phase of sig_freq(sig_phase_amp_freq_idx). NOTE: prepost_phase_amp_depth_perc +/- prepost_phase_amp_depth_perc_range must be within [0 100]
 
 %% clean up
 h.menu_triplets.String = {'1'}; h.menu_triplets.Value = 1; 
@@ -2244,9 +2317,11 @@ h.waitfor_panel.Visible='on'; h.waitfor_txt.String = sprintf('Running PLV/PLI Si
 %% run TFR source simulation
 src.Tag = 'sim'; update_study_cfg(src,hobj);
 update_source_cfg(src,hobj);
+h.sim_data.sig_final = []; 
+h.sim_data.sig_wav = []; h.sim_data.prepost_wav = []; h.sim_data.noise_wav = []; h.sim_data.cfg = []; h.sim_data.prepost_win = []; h.sim_data.sig_win = []; 
 switch h.menu_ARM_add.String{h.menu_ARM_add.Value}
     case 'Synthetic Only'
-        [h.sim_data.sig_final,h.sim_data.sig_wav,h.sim_data.prepost_wav,h.sim_data.noise_wav,h.sim_data.cfg,h.sim_data.prepost_win,h.sim_data.sig_win] = SimSignals_trips(h.cfg);
+        [h.sim_data.sig_final,h.sim_data.sig_wav,h.sim_data.prepost_wav,h.sim_data.noise_wav,h.sim_data.cfg,h.sim_data.prepost_win,h.sim_data.sig_win] = SimSignals(h.cfg);
         h.sim_data.source_waveform_type = 'Synthetic Source Signals Only';
     case 'ARM only'
         sm_ARM_run_sim();
@@ -2259,12 +2334,12 @@ switch h.menu_ARM_add.String{h.menu_ARM_add.Value}
         h.cfg.source.sig_amp_perc = h.cfg.ARM_params.sig_amp_perc;
         h.sim_data.source_waveform_type = 'ARM Source Signals Only';
     case 'Add Waveforms'
-        [h.sim_data.sig_final,h.sim_data.sig_wav,h.sim_data.prepost_wav,h.sim_data.noise_wav,h.sim_data.cfg,h.sim_data.prepost_win,h.sim_data.sig_win] = SimSignals_trips(h.cfg);
+        [h.sim_data.sig_final,h.sim_data.sig_wav,h.sim_data.prepost_wav,h.sim_data.noise_wav,h.sim_data.cfg,h.sim_data.prepost_win,h.sim_data.sig_win] = SimSignals(h.cfg);
         sm_ARM_run_sim();
         h.sim_data.sig_final = h.sim_data.sig_final + h.sim_data.ARM_source_sig_data;
         h.sim_data.source_waveform_type = 'Added (Synthetic + ARM) source signal waveforms';
     case 'Concatenate Sources'
-       [h.sim_data.sig_final,h.sim_data.sig_wav,h.sim_data.prepost_wav,h.sim_data.noise_wav,h.sim_data.cfg,h.sim_data.prepost_win,h.sim_data.sig_win] = SimSignals_trips(h.cfg);
+       [h.sim_data.sig_final,h.sim_data.sig_wav,h.sim_data.prepost_wav,h.sim_data.noise_wav,h.sim_data.cfg,h.sim_data.prepost_win,h.sim_data.sig_win] = SimSignals(h.cfg);
         sm_ARM_run_sim();
         h.sim_data.sig_final = cat(2,h.sim_data.sig_final,h.sim_data.ARM_source_sig_data);
         h.cfg.source.vx_idx = cat(2,h.cfg.source.vx_idx,h.cfg.ARM_params.vx_idx);
@@ -2405,13 +2480,13 @@ ha=h.ax_power(1);   % always Source 1 Power axes
 plot_flag=1;
 
 % creating new TFR ROI data for all 3 sources
-for tfr_idx = 1:size(h.cfg.source(h.selected_trip).sig_freqs,2)
+for tfr_idx = 1:size(h.cfg.source.sig_freqs,2)
     for v = 1:3
         
-        p1(1) = h.cfg.source(h.selected_trip).sig_start(v,tfr_idx);  % signal start
-        offset(1) = h.cfg.source(h.selected_trip).sig_durs(v,tfr_idx);
-        p1(2) = h.cfg.source(h.selected_trip).sig_freqs(v,tfr_idx,1);
-        offset(2) = h.cfg.source(h.selected_trip).sig_freqs(v,tfr_idx,2);
+        p1(1) = h.cfg.source.sig_start(v,tfr_idx);  % signal start
+        offset(1) = h.cfg.source.sig_durs(v,tfr_idx);
+        p1(2) = h.cfg.source.sig_freqs(v,tfr_idx,1);
+        offset(2) = h.cfg.source.sig_freqs(v,tfr_idx,2);
         
         
         x = [p1(1) p1(1)+offset(1) p1(1)+offset(1) p1(1) p1(1)];
@@ -2423,32 +2498,32 @@ for tfr_idx = 1:size(h.cfg.source(h.selected_trip).sig_freqs,2)
         h.tfr_ROI(v).h(tfr_idx).UserData.tfr_idx=tfr_idx;
         h.tfr_ROI(v).h(tfr_idx).UserData.roi.xpos=x;
         h.tfr_ROI(v).h(tfr_idx).UserData.roi.ypos=y;
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_amp=[0 0 1 1 0 0]*h.cfg.source(h.selected_trip).sig_amp_perc(v,tfr_idx)/100;
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_amp=[1 1 0 0 1 1]*h.cfg.source(h.selected_trip).prepost_amp_perc(v,tfr_idx)/100;
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_plv=[0 0 1 1 0 0]*h.cfg.source(h.selected_trip).sig_PLV_targets(v,tfr_idx);
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_plv=[1 1 0 0 1 1]*h.cfg.source(h.selected_trip).prepost_PLV_targets(v,tfr_idx);
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_pli=[0 0 1 1 0 0]*h.cfg.source(h.selected_trip).sig_PLI_targets(v,tfr_idx);
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_pli=[1 1 0 0 1 1]*h.cfg.source(h.selected_trip).prepost_PLI_targets(v,tfr_idx);
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_amp=[0 0 1 1 0 0]*h.cfg.source.sig_amp_perc(v,tfr_idx)/100;
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_amp=[1 1 0 0 1 1]*h.cfg.source.prepost_amp_perc(v,tfr_idx)/100;
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_plv=[0 0 1 1 0 0]*h.cfg.source.sig_PLV_targets(v,tfr_idx);
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_plv=[1 1 0 0 1 1]*h.cfg.source.prepost_PLV_targets(v,tfr_idx);
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_pli=[0 0 1 1 0 0]*h.cfg.source.sig_PLI_targets(v,tfr_idx);
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_pli=[1 1 0 0 1 1]*h.cfg.source.prepost_PLI_targets(v,tfr_idx);
         %         h.tfr_ROI(v).h(tfr_idx).UserData.roi.x_roi= [h.cfg.study.lat_sim(1) x(1) x(1)+range(x)/3 x(2)-range(x)/3 x(2) h.cfg.study.lat_sim(end)]; %[h.cfg.study.plot_time_int(1) x(1) x(1)+range(x)/3 x(2)-range(x)/3 x(2) h.cfg.study.plot_time_int(2)];
         
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.x_roi = [h.cfg.study.lat_sim(1) x(1) x(1)+h.cfg.source(h.selected_trip).sig_win_rise_time(v,tfr_idx) x(2)-h.cfg.source(h.selected_trip).sig_win_rise_time(v,tfr_idx) x(2) h.cfg.study.lat_sim(end)];
-        h.edit_tfr_roi_risetime.String = sprintf('%.3f',h.cfg.source(h.selected_trip).sig_win_rise_time(v,tfr_idx));
-        h.edit_tfr_roi_risetime_PLV.String = sprintf('%.3f',h.cfg.source(h.selected_trip).sig_win_rise_time(v,tfr_idx));
-        h.edit_tfr_roi_risetime_PLI.String = sprintf('%.3f',h.cfg.source(h.selected_trip).sig_win_rise_time(v,tfr_idx));
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.x_roi = [h.cfg.study.lat_sim(1) x(1) x(1)+h.cfg.source.sig_win_rise_time(v,tfr_idx) x(2)-h.cfg.source.sig_win_rise_time(v,tfr_idx) x(2) h.cfg.study.lat_sim(end)];
+        h.edit_tfr_roi_risetime.String = sprintf('%.3f',h.cfg.source.sig_win_rise_time(v,tfr_idx));
+        h.edit_tfr_roi_risetime_PLV.String = sprintf('%.3f',h.cfg.source.sig_win_rise_time(v,tfr_idx));
+        h.edit_tfr_roi_risetime_PLI.String = sprintf('%.3f',h.cfg.source.sig_win_rise_time(v,tfr_idx));
         
-        h.menu_sig_win_type.Value = h.cfg.source(h.selected_trip).sig_win_type(v,tfr_idx);
+        h.menu_sig_win_type.Value = h.cfg.source.sig_win_type(v,tfr_idx);
         
         h.tfr_ROI(v).h(tfr_idx).ButtonDownFcn=@selected_ROI;
         
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_evk_perc = h.cfg.source(h.selected_trip).sig_evoked_perc(v,tfr_idx);
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_evk_perc = h.cfg.source.sig_evoked_perc(v,tfr_idx);
         h.edit_sig_evoked_perc(v).String = num2str(h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_evk_perc);
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_evk_perc = h.cfg.source(h.selected_trip).prepost_evoked_perc(v,tfr_idx);
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_evk_perc = h.cfg.source.prepost_evoked_perc(v,tfr_idx);
         h.edit_prepost_evoked_perc(v).String = num2str(h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_evk_perc);
         
         % PLV info
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_phase_start = rad2deg(h.cfg.source(h.selected_trip).sig_phase_lag(v,tfr_idx));
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_phase_start = rad2deg(h.cfg.source.sig_phase_lag(v,tfr_idx));
         h.edit_sig_phase_start(v).String = num2str(h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_phase_start);
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_phase_start = rad2deg(h.cfg.source(h.selected_trip).prepost_phase_lag(v,tfr_idx));
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_phase_start = rad2deg(h.cfg.source.prepost_phase_lag(v,tfr_idx));
         h.edit_prepost_phase_start(v).String = num2str(h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_phase_start);
         
         freqs=round(y(1)):round(y(3));
@@ -2731,8 +2806,8 @@ switch answ
             %% update source locs, amps, and ori
             for v = 1:3
                 h.edit_source_locs(v).String = sprintf('%.f %.f %.f',h.cfg.study.source_locs_mm(v,:));
-                h.edit_source_amp(v).String = sprintf('%.f',h.cfg.source(h.selected_trip).vx_amp(v));
-                [az,el] = cart2sph(h.cfg.source(h.selected_trip).vx_ori(v,1),h.cfg.source(h.selected_trip).vx_ori(v,2),h.cfg.source(h.selected_trip).vx_ori(v,3));
+                h.edit_source_amp(v).String = sprintf('%.f',h.cfg.source.vx_amp(v));
+                [az,el] = cart2sph(h.cfg.source.vx_ori(v,1),h.cfg.source.vx_ori(v,2),h.cfg.source.vx_ori(v,3));
                 h.edit_source_ori(v).String = sprintf('%.f %.f',rad2deg(az),rad2deg(el));
             end
             
@@ -2813,20 +2888,11 @@ end
 %% Add & Update Triplets
 function update_triplet(varargin)
 % This function will add and update source triplets to the h.cfg.source configuration
+
 global h
 
 
 switch varargin{end}
-    case 'add'
-        h.cfg.study.source_locs_mm = [ -52    11    57; 3    51    57; 3   -49    57]; % default
-        nt = size(h.cfg.source,2)+1; 
-        h.cfg.source(nt) = source_triplet;
-        h.cfg.source(nt).vx_locs = h.cfg.study.source_locs_mm;
-        h.cfg.source(nt).src_clr = h.src_clr;
-        h.cfg.source(nt).fcn_find_nearest_idx(h.anatomy.leadfield.pos);
-        %% adding trip # to menu
-        h.menu_triplets.String = [{num2str([1:length(h.cfg.source)]')}]; % adding 1
-        h.menu_triplets.Value = nt;
     case 'copy'  % add triplets by copying over the selected triplet to new ones
         if isempty(h.tfr_ROI)
             warndlg('Please "Select ROI" for first triplet before adding another triplet','Warning');
@@ -2858,32 +2924,59 @@ switch varargin{end}
                     
                 end
             end
-            % nt = size(h.cfg.source,2)+1; % added triplet #
             h.cfg.source = x;
             
             %% adding trip # to menu
+            % nt = length(h.menu_triplets.String)+1; % added triplet #
             h.menu_triplets.String = [{num2str([1:length(h.menu_triplets.String)+1]')}]; % adding 1
             h.menu_triplets.Value = length(h.menu_triplets.String);
-            % update_triplet('update');
+            
         end
         
     case 'del'  % delete selected triplets
         %% Adding new triplet - by copying over first triplet to new ones
         if isscalar(h.menu_triplets.String)
-            warndlg('Cannot delete last triplet','Warning');
+            warndlg('Cannot delete last triplet. Delete TFR ROIs by right clicking on them.','Warning');
         else
-            nt = h.menu_triplets.Value;
-            kidx = setdiff(1:size(h.cfg.source,2),nt); % idx for keeping
-            h.cfg.source = h.cfg.source(kidx);
-             %% adding trip # to menu
-            h.menu_triplets.String = [{num2str([1:size(h.cfg.source,2)]')}]; % adding 1
-            h.menu_triplets.Value = size(h.cfg.source,2);
+            %% get field names
+            fn = fieldnames(h.cfg.source);
+            x = h.cfg.source;  % copy
+            trip_num = str2double(h.menu_triplets.String{h.menu_triplets.Value});   % triplet number selected
+            xv = ((trip_num-1)*3)+(1:3); % trips to remove
+            xv2 = ((trip_num-1)*6)+(1:6); % trips to remove
+            trip_v = setdiff(1:length(h.menu_triplets.String)*3,xv);
+            trip_v2 = setdiff(1:length(h.menu_triplets.String)*6,xv2);
+            
+        
+            for f=1:length(fn)
+                dims = size(h.cfg.source.(fn{f}));
+                if length(dims)==2 && dims(1)>=3 && dims(2)>1
+                    if isempty(strfind(fn{f},'phase_amp'))
+                        x.(fn{f}) = h.cfg.source.(fn{f})(trip_v,:,:);
+                    elseif ~isempty(strfind(fn{f},'phase_amp'))    % phase_amp has 1:6 rows
+                        x.(fn{f}) = h.cfg.source.(fn{f})(trip_v2,:,:);
+                    end
+                elseif length(dims)==3       % sig_freqs
+                    x.(fn{f}) = h.cfg.source.(fn{f})(trip_v,:,:);
+                else
+                    if isempty(strfind(fn{f},'phase_amp'))
+                        x.(fn{f}) = h.cfg.source.(fn{f})(trip_v);
+                    elseif ~isempty(strfind(fn{f},'phase_amp'))    % phase_amp has 1:6 rows
+                        x.(fn{f}) = h.cfg.source.(fn{f})(trip_v2);
+                    end
+                    
+                end
+            end
+               
+            h.cfg.source = x;
+            
+            %% update triplets menu
+            h.menu_triplets.String = [{num2str([1:length(h.menu_triplets.String)-1]')}]; % adding 1
+            h.menu_triplets.Value = length(h.menu_triplets.String);
         end
     case 'update'   % update h.cfg
-        h.selected_trip = h.menu_triplets.Value;
-
-        %% plot TFRs
-        replot_tfr_data_from_cfg();
+%         nt = h.menu_triplets.Value;
+%                replot_tfr_data_from_cfg();
 
 end
 
@@ -2891,6 +2984,12 @@ end
 function update_cfg(src,hobj)
 global h
 try
+    if contains(src.Tag,'bst2sm')
+        h = evalin('base','h');
+    else
+           if str2num(h.edit_num_trials.String)==0; h.edit_num_trials.String = '90'; end % default back to 90 trials
+    end
+
     h.cfg.study.SNR = str2num(h.edit_sens_SNR.String);
     update_study_cfg(src,hobj);
     %     h.cfg.source=[];
@@ -2909,10 +3008,11 @@ try
         h.tfr_ROI(v).h(h.current_tfr_idx).UserData.roi.prepost_phase_start = str2num(h.edit_prepost_phase_start(v).String);
         
     end
-%% plot mock source waves
-    plot_source_tfr(); plot_source_waves();
-    update_monte_carlo();
-  
+    %% plot mock source waves
+    if ~contains(src.Tag,'bst2sm')
+        plot_source_tfr(); plot_source_waves();
+        update_monte_carlo();
+    end
 catch me
     if h.new_study_flag==0 && h.start_flag==0 && h.load_study_flag==0
         fprintf('Error in "update_cfg"\n%s\n',me.message);
