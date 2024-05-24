@@ -127,6 +127,24 @@ else
     warning(sprintf('No MEG sensors found or HeadModel MEG Cortex file does not exist:   %s',bst.subj_hdm_meg_cortex_file));
     h.anatomy.headmodel_meg_cortex=[]; h.anatomy.leadfield_meg_cortex=[];
 end
+%% MEG HeadModel Spheres(Volume)
+if exist(bst.subj_hdm_meg_spheres_vol_file,'file') && ~isempty(meg_idx)
+    fprintf('Loading "MEG HeadModel & LeadField: Volume Surface" file and converting to FieldTrip format: %s\n',bst.subj_hdm_meg_spheres_vol_file);
+    [h.anatomy.headmodel_meg_spheres_vol, h.anatomy.leadfield_meg_spheres_vol] = out_fieldtrip_headmodel(bst.subj_hdm_meg_spheres_vol_file,chan_mat,meg_idx,include_megref);
+else
+    warning(sprintf('No MEG sensors found or HeadModel MEG Spheres(Volume) file does not exist:   %s',bst.subj_hdm_meg_spheres_vol_file));
+    h.anatomy.headmodel_meg_spheres_vol=[]; h.anatomy.leadfield_meg_spheres_vol=[];
+end
+%% MEG HeadModel Spheres(Cortex)
+if exist(bst.subj_hdm_meg_spheres_cortex_file,'file') && ~isempty(meg_idx)
+    fprintf('Loading "MEG HeadModel & LeadField: Cortical Surface" file and converting to FieldTrip format: %s\n',bst.subj_hdm_meg_spheres_cortex_file);
+    [h.anatomy.headmodel_meg_spheres_cortex, h.anatomy.leadfield_meg_spheres_cortex] = out_fieldtrip_headmodel(bst.subj_hdm_meg_spheres_cortex_file,chan_mat,meg_idx,include_megref);
+else
+    warning(sprintf('No MEG sensors found or HeadModel MEG Spheres(Cortex) file does not exist:   %s',bst.subj_hdm_meg_spheres_cortex_file));
+    h.anatomy.headmodel_meg_spheres_cortex=[]; h.anatomy.leadfield_meg_spheres_cortex=[];
+end
+
+
 
 %% Sensor EEG
 eeg_idx = [];
@@ -161,6 +179,22 @@ else
     warning(sprintf('No EEG sensors found or HeadModel EEG Cortex file does not exist:   %s',bst.subj_hdm_eeg_cortex_file));
     h.anatomy.headmodel_eeg_cortex=[]; h.anatomy.leadfield_eeg_cortex=[];
 end
+%% EEG HeadModel Spheres(Volume)
+if exist(bst.subj_hdm_eeg_spheres_vol_file,'file') && ~isempty(eeg_idx)
+    fprintf('Loading "EEG HeadModel & LeadField: Volume Surface" file and converting to FieldTrip format: %s\n',bst.subj_hdm_eeg_spheres_vol_file);
+    [h.anatomy.headmodel_eeg_spheres_vol, h.anatomy.leadfield_eeg_spheres_vol] = out_fieldtrip_headmodel(bst.subj_hdm_eeg_spheres_vol_file,chan_mat,eeg_idx,include_megref);
+else
+    warning(sprintf('No EEG sensors found or HeadModel EEG Spheres(Volume) file does not exist:   %s',bst.subj_hdm_eeg_spheres_vol_file));
+    h.anatomy.headmodel_eeg_spheres_vol=[]; h.anatomy.leadfield_eeg_spheres_vol=[];
+end
+%% EEG HeadModel Spheres(Cortex)
+if exist(bst.subj_hdm_eeg_spheres_cortex_file,'file') && ~isempty(eeg_idx)
+    fprintf('Loading "EEG HeadModel & LeadField: Cortical Surface" file and converting to FieldTrip format: %s\n',bst.subj_hdm_eeg_spheres_cortex_file);
+    [h.anatomy.headmodel_eeg_spheres_cortex, h.anatomy.leadfield_eeg_spheres_cortex] = out_fieldtrip_headmodel(bst.subj_hdm_eeg_spheres_cortex_file,chan_mat,eeg_idx,include_megref);
+else
+    warning(sprintf('No EEG sensors found or HeadModel EEG Spheres(Cortex) file does not exist:   %s',bst.subj_hdm_eeg_spheres_cortex_file));
+    h.anatomy.headmodel_eeg_spheres_cortex=[]; h.anatomy.leadfield_eeg_spheres_cortex=[];
+end
 
 
 %% converted flag
@@ -185,14 +219,22 @@ if ~isempty(h.anatomy.mri);       h.anatomy.mri = ft_convert_units(h.anatomy.mri
 
 if ~isempty(h.anatomy.headmodel_eeg_cortex);    h.anatomy.headmodel_eeg_cortex = ft_convert_units(h.anatomy.headmodel_eeg_cortex,'mm'); end
 if ~isempty(h.anatomy.headmodel_eeg_vol);       h.anatomy.headmodel_eeg_vol = ft_convert_units(h.anatomy.headmodel_eeg_vol,'mm'); end
+if ~isempty(h.anatomy.headmodel_eeg_spheres_cortex);    h.anatomy.headmodel_eeg_spheres_cortex = ft_convert_units(h.anatomy.headmodel_eeg_spheres_cortex,'mm'); end
+if ~isempty(h.anatomy.headmodel_eeg_spheres_vol);       h.anatomy.headmodel_eeg_spheres_vol = ft_convert_units(h.anatomy.headmodel_eeg_spheres_vol,'mm'); end
 if ~isempty(h.anatomy.headmodel_meg_cortex);    h.anatomy.headmodel_meg_cortex = ft_convert_units(h.anatomy.headmodel_meg_cortex,'mm'); end
 if ~isempty(h.anatomy.headmodel_meg_vol);       h.anatomy.headmodel_meg_vol = ft_convert_units(h.anatomy.headmodel_meg_vol,'mm'); end
+if ~isempty(h.anatomy.headmodel_meg_spheres_cortex);    h.anatomy.headmodel_meg_spheres_cortex = ft_convert_units(h.anatomy.headmodel_meg_spheres_cortex,'mm'); end
+if ~isempty(h.anatomy.headmodel_meg_spheres_vol);       h.anatomy.headmodel_meg_spheres_vol = ft_convert_units(h.anatomy.headmodel_meg_spheres_vol,'mm'); end
 
 
 if ~isempty(h.anatomy.leadfield_eeg_cortex); h.anatomy.leadfield_eeg_cortex = ft_convert_units(h.anatomy.leadfield_eeg_cortex,'mm'); end
 if ~isempty(h.anatomy.leadfield_eeg_vol); h.anatomy.leadfield_eeg_vol = ft_convert_units(h.anatomy.leadfield_eeg_vol,'mm'); end
+if ~isempty(h.anatomy.leadfield_eeg_spheres_cortex); h.anatomy.leadfield_eeg_spheres_cortex = ft_convert_units(h.anatomy.leadfield_eeg_spheres_cortex,'mm'); end
+if ~isempty(h.anatomy.leadfield_eeg_spheres_vol); h.anatomy.leadfield_eeg_spheres_vol = ft_convert_units(h.anatomy.leadfield_eeg_spheres_vol,'mm'); end
 if ~isempty(h.anatomy.leadfield_meg_cortex); h.anatomy.leadfield_meg_cortex = ft_convert_units(h.anatomy.leadfield_meg_cortex,'mm'); end
 if ~isempty(h.anatomy.leadfield_meg_vol); h.anatomy.leadfield_meg_vol = ft_convert_units(h.anatomy.leadfield_meg_vol,'mm'); end
+if ~isempty(h.anatomy.leadfield_meg_spheres_cortex); h.anatomy.leadfield_meg_spheres_cortex = ft_convert_units(h.anatomy.leadfield_meg_spheres_cortex,'mm'); end
+if ~isempty(h.anatomy.leadfield_meg_spheres_vol); h.anatomy.leadfield_meg_spheres_vol = ft_convert_units(h.anatomy.leadfield_meg_spheres_vol,'mm'); end
 
 %% make sens compatbile with SimMEEG
 if ~isempty(h.anatomy.sens_meg)

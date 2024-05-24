@@ -96,7 +96,8 @@ vol_leadfield = leadfield;
 
 
 %%
-anatomy.vol.bnd(1) = vol.bnd(3); anatomy.vol.bnd(3) = vol.bnd(1);
+anatomy.vol.bnd(1) = vol.bnd(3); an9
+atomy.vol.bnd(3) = vol.bnd(1);
 save('C:\BRANELab\matlab_progs\general_progs\EEG_sim\SimSignals_GUI\anatomy\ANATOMY_DEFAULT_BRANELab_MEEG_1yr_infant.mat','mri', 'segmentedmri', 'vol', 'elec', 'scalp', 'please_read', 'pial_mesh', 'sens_adult_dewar', 'sens_infant_dewar', 'sens_adult_dewar_supine', 'mesh_hd', 'bnd', 'elec_good', 'chan_idx', 'vol_leadfield', 'mesh_sourcemodel', 'mesh_leadfield', 'leadfield', 'vx_locs', 'eeg_vol_leadfield', 'vol_infant_dewar', 'vol_adult_dewar', 'vol_adult_dewar_supine', 'meg_vol_leadfield', 'vol_eeg');
 
 

@@ -24,19 +24,19 @@ cfg=h.sim_data.cfg;
 %% Plotting --> Confirming
 if length(h.current_3D_peak_idx)>3
        hm2=msgbox(sprintf('\nSelected closest peak locations to True Sources.\n\nConducting PLV/PLI analyses.\n')); 
-    h.current_3D_peak_idx = h.current_3D_peak_idx(1:3); 
+    h.current_3D_peak_idx = h.current_3D_peak_idx(1:length(h.sim_data.cfg.source.vx_idx)); 
 end
 
 if ~isempty(h.current_3D_peak_idx) && length(h.current_3D_peak_idx)<=3
    
     switch h.inv_soln(h.current_inv_soln).Type
-        case {'SPA','SIA','LCMV','sLORETA','sMCMV','bRAPBeam','TrapMUSIC'}    % BRANE Lab beamformers
+        case  {'SPA' 'LCMV (FT)' 'SAM (FT)' 'sLORETA (FT)' 'dics (FT)' 'pcc (FT)' 'SAM (FT)'}     % scalar inverse solutions
             h.current_peak_swf_trials = nan(size(h.sim_data.sens_final,1), length(h.current_3D_peak_idx),size(h.sim_data.sens_final,3));
             for t=1:size(h.sim_data.sens_final,3)
                 h.current_peak_swf_trials(:,:,t) = [h.inv_soln(h.current_inv_soln).soln.wts(:,h.current_3D_peak_idx)'*squeeze(h.sim_data.sens_final(:,:,t))']';
                 h.current_peak_swf_trials(:,:,t) = bsxfun(@minus, h.current_peak_swf_trials(:,:,t), nanmean(h.current_peak_swf_trials(h.sim_data.cfg.study.base_samps,:,t)));
             end
-        case {'MIA'}    % BRANE Lab beamformers
+        case {'SIA' 'MIA''sMCMV' 'bRAPBeam' 'TrapMUSIC'}    % multi-source beamformers
             h.current_peak_swf_trials = nan(size(h.sim_data.sens_final,1), length(h.current_3D_peak_idx),size(h.sim_data.sens_final,3));
             for t=1:size(h.sim_data.sens_final,3)
                 h.current_peak_swf_trials(:,:,t) = [h.inv_soln(h.current_inv_soln).soln.wts(:,h.current_3D_peak_idx)'*squeeze(h.sim_data.sens_final(:,:,t))']';
@@ -44,7 +44,7 @@ if ~isempty(h.current_3D_peak_idx) && length(h.current_3D_peak_idx)<=3
 %                 h.current_peak_swf_trials(:,:,t) = [h.inv_soln(h.current_inv_soln).soln.nulled_wts(:,h.current_3D_peak_idx)'*squeeze(h.sim_data.sens_final(:,:,t))']';
                 h.current_peak_swf_trials(:,:,t) = bsxfun(@minus, h.current_peak_swf_trials(:,:,t), nanmean(h.current_peak_swf_trials(h.sim_data.cfg.study.base_samps,:,t)));
             end
-        case {'eLORETA','MNE'}    % Field Trips inverse solutions
+        case {'MNE (FT)' 'eLORETA (FT)' 'LCMV (BST)' 'MNE (BST)' 'sLORETA (BST)'}     % vector inverse solutions
             % picking orientation with maximal response in active interval to generate a source waveform
              h.current_peak_swf = h.inv_soln(h.current_inv_soln).soln.avg.pow(h.inv_soln(h.current_inv_soln).leadfield.inside==1,:)';
             

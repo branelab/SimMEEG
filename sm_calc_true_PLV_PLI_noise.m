@@ -92,7 +92,7 @@ if calc_flag==1
     fprintf('Calculating PLV ...\n')
     
     plv_phase=angle(true_wt2);
-    chan_contrasts = nchoose2(1:3);
+    chan_contrasts = nchoose2(1:length(h.cfg.source.vx_idx));
     
     F_plv=F2;
     coi_wt2=coi_true_wt; coi_wt2(coi_true_wt>max(F2))=nan; coi_wt2(coi_true_wt<min(F2))=nan;
@@ -142,30 +142,30 @@ if calc_flag==1
         end
     end
     delete(hw);
-    h.cfg.source.TFR_results.Noise.plv_surg_based_mean = plv_surg_based_mean; clear plv_surg_based_mean;
-    h.cfg.source.TFR_results.Noise.plv_surg_based_std = plv_surg_based_std; clear plv_surg_based_std;
-    h.cfg.source.TFR_results.Noise.pli_surg_based_mean = pli_surg_based_mean; clear plv_surg_based_mean;
-    h.cfg.source.TFR_results.Noise.pli_surg_based_std = pli_surg_based_std; clear pli_surg_based_std;
-    h.cfg.source.TFR_results.Noise.dpli_surg_based_mean = dpli_surg_based_mean; clear dpli_surg_based_mean
-    h.cfg.source.TFR_results.Noise.dpli_surg_based_std = dpli_surg_based_std; clear dpli_surg_based_std;
+    h.sim_data.cfg.source.TFR_results.Noise.plv_surg_based_mean = plv_surg_based_mean; clear plv_surg_based_mean;
+    h.sim_data.cfg.source.TFR_results.Noise.plv_surg_based_std = plv_surg_based_std; clear plv_surg_based_std;
+    h.sim_data.cfg.source.TFR_results.Noise.pli_surg_based_mean = pli_surg_based_mean; clear plv_surg_based_mean;
+    h.sim_data.cfg.source.TFR_results.Noise.pli_surg_based_std = pli_surg_based_std; clear pli_surg_based_std;
+    h.sim_data.cfg.source.TFR_results.Noise.dpli_surg_based_mean = dpli_surg_based_mean; clear dpli_surg_based_mean
+    h.sim_data.cfg.source.TFR_results.Noise.dpli_surg_based_std = dpli_surg_based_std; clear dpli_surg_based_std;
     
     % exporting to cfg.source
-    h.cfg.source.TFR_results.Noise.avg_true_wt = avg_true_wt; h.cfg.source.TFR_results.Noise.avg_true_wt_evk = avg_true_wt_evk; h.cfg.source.TFR_results.Noise.avg_true_wt_ind = avg_true_wt_ind;
+    h.sim_data.cfg.source.TFR_results.Noise.avg_true_wt = avg_true_wt; h.sim_data.cfg.source.TFR_results.Noise.avg_true_wt_evk = avg_true_wt_evk; h.sim_data.cfg.source.TFR_results.Noise.avg_true_wt_ind = avg_true_wt_ind;
     if any( strcmp(h.listbox_inv_FC_type.String(h.listbox_inv_FC_type.Value),'PLV') )
         plv_based=bsxfun(@minus,plv_data,nanmean(plv_data(:,:,h.cfg.study.base_samps),3));
-        h.cfg.source.TFR_results.Noise.plv_based = plv_based;
-        h.cfg.source.TFR_results.Noise.plv_data = plv_data;
+        h.sim_data.cfg.source.TFR_results.Noise.plv_based = plv_based;
+        h.sim_data.cfg.source.TFR_results.Noise.plv_data = plv_data;
     end
     if any( strcmp(h.listbox_inv_FC_type.String(h.listbox_inv_FC_type.Value),'PLI') )
         pli_based=bsxfun(@minus,pli_data,nanmean(pli_data(:,:,base_samps_pli),3));
         dpli_based=bsxfun(@minus,dpli_data,nanmean(dpli_data(:,:,base_samps_pli),3));
-        h.cfg.source.TFR_results.Noise.pli_data = pli_data;
-        h.cfg.source.TFR_results.Noise.pli_based = pli_based; h.cfg.source.TFR_results.Noise.dpli_based = dpli_based;
-        h.cfg.source.TFR_results.Noise.pli_lat = pli_lat;
+        h.sim_data.cfg.source.TFR_results.Noise.pli_data = pli_data;
+        h.sim_data.cfg.source.TFR_results.Noise.pli_based = pli_based; h.sim_data.cfg.source.TFR_results.Noise.dpli_based = dpli_based;
+        h.sim_data.cfg.source.TFR_results.Noise.pli_lat = pli_lat;
     end
-    h.cfg.source.TFR_results.Noise.TFR_freqs = F2;
-    h.cfg.source.TFR_results.Noise.coi_wt2 = coi_wt2;
-    h.cfg.source.TFR_results.Noise.PLV_freqs = F2;
+    h.sim_data.cfg.source.TFR_results.Noise.TFR_freqs = F2;
+    h.sim_data.cfg.source.TFR_results.Noise.coi_wt2 = coi_wt2;
+    h.sim_data.cfg.source.TFR_results.Noise.PLV_freqs = F2;
     
     fprintf('Analysis Completed! Time to compute = %.f sec\n',toc);
 end

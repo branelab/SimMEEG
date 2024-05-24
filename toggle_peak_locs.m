@@ -3,12 +3,12 @@ global h
 
 h.map3D_peak_ori = handle(h.map3D_peak_ori);
 if h.radio_3D_peak_locs.Value == 1
-    h.map3D_peak_locs(1).Visible = 'on'; %h.map3D_peak_locs(2).Visible = 'on';
-    h.map3D_peak_locs(2).Visible = 'on'; %h.map3D_peak_locs(2).Visible = 'on';
-    for v=1:length(h.map3D_peak_ori); h.map3D_peak_ori(v).Visible='on'; end
+    try set(h.map3D_peak_locs,'Visible','on');  catch; end 
+    try set(h.map3D_peak_ori,'Visible','on'); catch; end
+    try set(h.current_peak_selected,'Visible','on'); catch; end
 elseif h.radio_3D_peak_locs.Value == 0
-    h.map3D_peak_locs(1).Visible = 'off'; %h.map3D_peak_locs(2).Visible = 'off';
-    h.map3D_peak_locs(2).Visible = 'off'; %h.map3D_peak_locs(2).Visible = 'off';
-    for v=1:length(h.map3D_peak_ori); h.map3D_peak_ori(v).Visible='off'; end
+    try set(h.map3D_peak_locs,'Visible','off');catch; end 
+    try set(h.map3D_peak_ori,'Visible','off'); catch; end
+    try set(h.current_peak_selected,'Visible','off'); catch; end
 end
 bs_plot_peak_waves;

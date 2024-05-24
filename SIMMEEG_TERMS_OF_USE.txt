@@ -17,4 +17,8 @@ TO THE FULLEST EXTENT PERMITTED BY LAW, THE LICNESEE AGREES TO INDEMNIFY, DEFEND
 4. Trade-Marks and Names –
 The Licensee will not use the name, logo, or trade-marks of the copyright holder or make reference to the copyright holder or its name in any advertising or publicity, without the prior written consent of the copyright holder.  The name of the copyright holder, or any other party who modifies or conveys the Program, shall not be used to endorse or promote products derived from the Program without express written permission. 
  
+Other 3rd Party GNU-licenses
+
+"arm_generate_signal.m” = MIT License - Copyright 2006-2018 Guido Nolte and Stefan Haufe
+ 
 

@@ -247,7 +247,7 @@ else
             noise_wav(:,v,:)=((rand(cfg.study.num_samps,1,cfg.study.num_trials)-0.5)*2)*(cfg.study.noise_amp_perc/100);
         end
     elseif   cfg.study.noise_flag==2    % Narrow-band white noise for prestimulus noise
-        fprintf('Fitlering white-noise. This might take some time ...\n');
+        fprintf('Filtering white-noise. This might take some time ...\n');
         if cfg.study.noise_freqs(1)<=0
             %             f_type='low'; f_method='fir';
             freqs=cfg.study.noise_freqs(2);

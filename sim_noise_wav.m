@@ -2,22 +2,22 @@ function noise_wav = sim_noise_wav(cfg,num_chans)
 
 
 %% Noise --> Whitening the signals by adding noise to sig_final based on designated type 'noise_flag'.
-if cfg.study.noise_flag==1   % adding broad-band white-noise to ssp defined by noise_amp_perc
+if cfg.study.synthetic_noise_flag==1   % adding broad-band white-noise to ssp defined by noise_amp_perc
     noise_wav = nan(cfg.study.num_samps,num_chans,cfg.study.num_trials);
     for v=1:num_chans
         noise_wav(:,v,:)=((rand(cfg.study.num_samps,1,cfg.study.num_trials)-0.5)*2);
     end
-elseif   cfg.study.noise_flag==2    % Narrow-band white noise for prestimulus noise
-    fprintf('Fitlering white-noise. This might take some time ...\n');
-    if cfg.study.noise_freqs(1)<=0
+elseif   cfg.study.synthetic_noise_flag==2    % Narrow-band white noise for prestimulus noise
+    fprintf('Filtering white-noise. This might take some time ...\n');
+    if cfg.study.synthetic_noise_freqs(1)<=0
         %             f_type='low'; f_method='fir';
-        freqs=cfg.study.noise_freqs(2);
-    elseif cfg.study.noise_freqs(2)<=0
+        freqs=cfg.study.synthetic_noise_freqs(2);
+    elseif cfg.study.synthetic_noise_freqs(2)<=0
         %             f_type='high'; f_method='fir';
-        freqs=cfg.study.noise_freqs(1);
+        freqs=cfg.study.synthetic_noise_freqs(1);
     else
         %             f_type='bandpass'; f_method='fir';
-        freqs=cfg.study.noise_freqs;
+        freqs=cfg.study.synthetic_noise_freqs;
     end
     
     num_reps=ceil((4/freqs(1))/(range(cfg.study.lat_sim))); % making sure that at least 4 cycles of lowest filter freq will be within the latency interval
@@ -27,9 +27,10 @@ elseif   cfg.study.noise_flag==2    % Narrow-band white noise for prestimulus no
     y=rand(cfg.study.num_samps*num_reps,num_chans,cfg.study.num_trials)-.5;
     nyq=cfg.study.srate/2; % nyquist frequency
     
-    fprintf('Adding narrow-Band Noise ([%.2f %.2f] Hz) = %.f percent\n',cfg.study.noise_freqs,cfg.study.noise_amp_perc);
+%     fprintf('Adding narrow-Band Noise ([%.2f %.2f] Hz) = %.f percent\n',cfg.study.synthetic_noise_freqs,cfg.study.synthetic_noise_amp_perc);
+    fprintf('Adding narrow-Band Noise ([%.2f %.2f] Hz) = %.f percent\n',cfg.study.synthetic_noise_freqs);
     
-    b=fir1(nyq,cfg.study.noise_freqs/nyq); fn =  dfilt.df2t(b); %fvtool(fn,'Fs',cfg.study.srate);
+    b=fir1(nyq,cfg.study.synthetic_noise_freqs/nyq); fn =  dfilt.df2t(b); %fvtool(fn,'Fs',cfg.study.srate);
     y2=filter(fn,y);
     xsamps=round(size(y2,1)/2)-round(.5*cfg.study.num_samps);   % getting data in center of filtered data x to avoid windowing effects
     if xsamps(1)==0; xsamps=1; end
@@ -37,17 +38,17 @@ elseif   cfg.study.noise_flag==2    % Narrow-band white noise for prestimulus no
     noise_wav=y2(xsamps,:,:);
     noise_wav=noise_wav./max(max(max(abs(noise_wav)))); %scaling -1 to 1
     
-elseif cfg.study.noise_flag==3            % adding broad-band (white) noise with notches at signal frequencies to be added across epochs with ampltidue defined by 'noise_amp_perc'
+elseif cfg.study.synthetic_noise_flag==3            % adding broad-band (white) noise with notches at signal frequencies to be added across epochs with ampltidue defined by 'noise_amp_perc'
     fprintf('Adding notched white-noise. This might take some time ...\n');
-    if cfg.study.noise_freqs(1)<=0
+    if cfg.study.synthetic_noise_freqs(1)<=0
         %             f_type='low'; f_method='fir';
-        freqs=cfg.study.noise_freqs(2);
-    elseif cfg.study.noise_freqs(2)<=0
+        freqs=cfg.study.synthetic_noise_freqs(2);
+    elseif cfg.study.synthetic_noise_freqs(2)<=0
         %             f_type='high'; f_method='fir';
-        freqs=cfg.study.noise_freqs(1);
+        freqs=cfg.study.synthetic_noise_freqs(1);
     else
         %             f_type='bandpass'; f_method='fir';
-        freqs=cfg.study.noise_freqs;
+        freqs=cfg.study.synthetic_noise_freqs;
     end
     num_reps=ceil((4/freqs(1))/(range(cfg.study.lat_sim))); % making sure that at least 4 cycles of lowest filter freq will be within the latency interval
     if mod(num_reps,2)==0 % even number ad one rep to get odd number so that middle will be saddled by even number of samples
@@ -73,7 +74,7 @@ elseif cfg.study.noise_flag==3            % adding broad-band (white) noise with
     xsamps=xsamps:xsamps+cfg.study.num_samps; xsamps=xsamps(1:cfg.study.num_samps);
     noise_wav=y2(xsamps,:,:);
     noise_wav=noise_wav./max(max(max(abs(noise_wav)))); %scaling -1 to 1
-elseif cfg.study.noise_flag==4            % adding pink noise
+elseif cfg.study.synthetic_noise_flag==4            % adding pink noise
     nyq=cfg.study.srate/2;
     fprintf('Generating Colored noise. This might take some time ...\n');
     % trpiling num_samps to deal with filtering edge effects - only
@@ -81,9 +82,9 @@ elseif cfg.study.noise_flag==4            % adding pink noise
     for vv=1:num_chans
         %             cn = dsp.ColoredNoise('Color','Pink','SamplesPerFrame',3*cfg.study.num_samps,'NumChannels',cfg.study.num_trials,'OutputDataType','double');
         % padding noise with 2 trial at beginning and 2 trials at end to reduce filter edge effects
-        cn = dsp.ColoredNoise(cfg.study.pink_noise_slope,'SamplesPerFrame',(4*cfg.study.num_samps)+(cfg.study.num_trials*cfg.study.num_samps),'NumChannels',1,'OutputDataType','double');
+        cn = dsp.ColoredNoise(cfg.study.synthetic_pink_noise_slope,'SamplesPerFrame',(4*cfg.study.num_samps)+(cfg.study.num_trials*cfg.study.num_samps),'NumChannels',1,'OutputDataType','double');
         y = cn();
-        b=fir1(nyq,cfg.study.noise_freqs/nyq); fn =  dfilt.df2t(b); %fvtool(fn,'Fs',cfg.study.srate);
+        b=fir1(nyq,cfg.study.synthetic_noise_freqs/nyq); fn =  dfilt.df2t(b); %fvtool(fn,'Fs',cfg.study.srate);
         y=filter(fn,y);
         y=y/max(max(abs(y)));
         

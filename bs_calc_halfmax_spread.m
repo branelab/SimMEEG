@@ -4,11 +4,16 @@ function [half_width,xslices,yslices,zslices]=bs_calc_halfmax_spread(img,voxel_p
 % voxel_pos = h.inv_soln(c).leadfield.voxel_pos;
 % peak_locs = h.inv_soln(c).leadfield.voxel_pos(h.current_3D_peak_idx,:);
 voxel_pos = double(voxel_pos);
-peak_locs = double(voxel_pos(peak_idx,:));
+peak_locs = nan(length(peak_idx),3);
+peak_locs(~isnan(peak_idx),:) = double(voxel_pos(peak_idx(~isnan(peak_idx)),:));
 img = double(img); 
 
+xslices = repmat(struct('idx',nan,'vals',nan),length(peak_idx),1); yslices = xslices; zslices = xslices;
+half_width = repmat(struct('edges_x', nan,'val_x', nan,'edges_y', nan,'val_y', nan,'edges_z', nan,'val_z', nan,'average',nan),length(peak_idx),1); 
 % clear xslices yslices zslices
 for v=1:length(peak_idx)
+    if isnan(peak_idx(v))
+    else
     xslices(v).idx = find( voxel_pos(:,2)== peak_locs(v,2) & voxel_pos(:,3)== peak_locs(v,3) )';
     yslices(v).idx = find( voxel_pos(:,1)== peak_locs(v,1) & voxel_pos(:,3)== peak_locs(v,3) )';
     zslices(v).idx = find( voxel_pos(:,1)== peak_locs(v,1) & voxel_pos(:,2)== peak_locs(v,2) )';
@@ -121,4 +126,5 @@ for v=1:length(peak_idx)
     end
     %% average source leakage
     half_width(v).average = nanmean([half_width(v).val_x half_width(v).val_y half_width(v).val_z]);
+    end
 end

@@ -16,6 +16,8 @@ switch cfg.sens_type
         sens_out.elecpos  = sens.elecpos(cfg.sens_idx,:);
         sens_out.label = sens.label(cfg.sens_idx);
         sens_out.tra = sens.tra(cfg.sens_idx,cfg.sens_idx);
+        sens_out.bad_sensors = setdiff(1:size(sens.chanpos,1),cfg.sens_idx);
+        sens_out.good_sensors = cfg.sens_idx;
         sens_out.cfg=sens_out;
     case {'eeg','EEG'}
         sens_out.chanpos  = sens.chanpos(cfg.sens_idx,:);
@@ -24,6 +26,8 @@ switch cfg.sens_type
         sens_out.elecpos  = sens.elecpos(cfg.sens_idx,:);
         sens_out.label = sens.label(cfg.sens_idx);
         sens_out.tra = sens.tra(cfg.sens_idx,cfg.sens_idx);
+        sens_out.bad_sensors = setdiff(1:size(sens.chanpos,1),cfg.sens_idx);
+        sens_out.good_sensors = cfg.sens_idx;
         sens_out.cfg=sens_out;
 end
 

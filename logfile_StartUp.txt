@@ -1,0 +1,3 @@
+License Folder = C:\BRANELab\Software\SimMEEG\SimMEEG_v22b
+Data Folder = C:\BRANELab\Software\SimMEEG\SimMEEG_v22b
+Activation performed on = 12-Nov-2022

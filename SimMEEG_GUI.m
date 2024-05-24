@@ -2,7 +2,32 @@ function SimMEEG_GUI(varargin)
 %% GUI for user-friendly selection of parameters needed to run SimSignals.m
 %    varagin = bst structure called directly from Brainstorm see "sm_bst2ft_anatomy_from_bst_files" for input structure
 %
-% This version is for general distribution
+% This version is only for distribution with Alex Moiseev.
+%
+%
+% To Do: 
+%   - consider adding MVAR model simulation, called Seed-G by @author: alessandra anzolin (aanzolin@mgh.harvard.edu).
+%   - add in EOG artefact simulation based on typical EOG blinks and saccades --> then need to include artefact remove/reduce functions (a lot of work to do this properly).
+%
+% Updates v24b: Too many to list in detail
+%   Major: 
+%   - added signal-spread function (SPF) and cross-talk functions (CTF)
+%   - Important Note: Non-normalized inverse maps must be selected to get same peak locations for Brainstorm's and FieldTrip's inverse solutions: I tested Brainstorm's inverse
+%   solutions within SimMEEG and within Brainstorm and they replicate as long as "normalized maps" is not selected. 
+%
+%   Minor:
+%   - removed parfor loops for some of functions, but kept it for BRANELab beamformers because it really speeds up the processing.
+%   - general improvements, memory usage improvements, and processing speed ups
+%
+% Updates since v21d: Too many to list in detail
+%   Major:
+%   - added ability to simuluate sources using Auto-Regressive Model (ARM) - "arm_generate_signal.m" Copyright 2006-2018 Guido Nolte and Stefan Haufe.
+%   - added spatial (synthetic Cov), temporal (ARM), or spatiotemporal (Cov + ARM) shaping of synthetic noise
+%   - added ROC analyses of PLV/PLI to estimate performance of inverse solution's ability to estimate ground truth connectivity, i.e., FC for "true" source PLV/PLI.
+%   - added ability to load in multiple channel montages to be selected from "Anatomy" file; default anatomy contains MEG (sensors = 151) and EEG (channels = 16, 32, 64, 128, and 256).
+%
+%   Minor:
+%   - general improvements in user interfaces and data selection options
 %
 % Updates since v19:
 %   - Major Bug Fixed - Source modeling was setting "Simulated" forward leadfields to the "inverse Head Model" selection --> this yields wrong location errors
@@ -30,38 +55,68 @@ function SimMEEG_GUI(varargin)
 %   - added ability to inverse project sensor noise to Seed and comparison locations to use as baseline statistics similar to surrogate statistics for PLV, null distributions are
 %       based on reshaped matrix of within the active interval of the inverse solution
 %   - fixed "plot normalized waves" so that "true source waves" are also normalized just liked the "peak source waves" so that the "% Residual Variance" is more accurate measure.
-%   - fixed dB calculation for wavelet TFR in plot_SimSignals.m --> dB = 10*( log10(active) - log10(baseline) );
 %
 %
 % Bug or Need-to-Fix report
+%   - Need to fix "Nearest" for finding nearest source loc to true source based on search distance. Curently making errors of selecting too far away sources
 %   - Vector inverse solution --> need to add option for selecting maximal dipole orientation <-- currently set to rms of 3 dipole orientations to yield final maps and waveforms
 %   - allow use to define "dip_thresh" search distances for spatiotemporal searches --> line 44 in "sm_spatiotemp_mapping.m"
 %   - add in tooltips for all buttons, edit boxes, etc.
 %   - Time-Frequency Analysis --> change to or add in "ft_freqanalysis.m" because it has a lot more functionality and evidence for use with M/EEG
+%   - Fixed dB calculation for wavelet TFR in plot_SimSignals.m --> dB = 10*( log10(active) - log10(baseline) );
 %
 % Modules to add
 %   - inverse project sens_noise to true source dipoles using leadfield weights to yield "source_noise" --> then project sens_noise using inv_soln weights and compare to source_noise
 %   	Aslo, project sim_data.noise_wav to sensor space to yield "source_noise"
 %
 
-version_num = 2.1;
+version_num = '2.4e';
 
-clear h
+% hm = warndlg(sprintf('This version is to be used only by Alex Moiseev and Tony Herdman!\n\nYou are viloating Intellectual Property Rights if you are not either of these persons.\n\n'));
+% waitfor(hm);
+
+% clear h
 global h
 warning('off','all');
 % opengl software;
+[h.simmeeg_dir,h.simmeeg_prog] = fileparts(which('SimMEEG_GUI'));
+addpath(h.simmeeg_dir);
+
+
+%% function handles
+h.fcn_handle.plot_3D_mri = @plot_3D_mri;
+h.fcn_handle.menu_head_model_CallBack = @menu_head_model_CallBack;
+h.fcn_set_topo_caxis = @set_topo_caxis;
+h.fcn_update_source_data = @update_source_data;
+h.fcn_edit_source_CallBack = @edit_source_CallBack; 
+h.fcn_plot_3D_mri = @plot_3D_mri; 
+h.fcn_update_cfg = @update_cfg; 
+h.fcn_plot_sens_data = @plot_sens_data;
+h.fcn_listbox_inv_solns_Callback = @listbox_inv_solns_Callback;
 
 %% Finding varargin that has anatomy variables called from Brainstorm
+h.bst_called_flag = 0; 
 for vi = 1:length(varargin)
     if isfield(varargin{1},'subj_MriFile')
         bst = varargin{vi};
+        
+        if isfield(bst,'new_bst_simmeeg_installed')
+        
+        end
+        
+        
         h.bst_called_flag = 1;   % SimMEEG was called from Brainstorm
+        h.bst = bst;
     end
 end
 
 % btn = questdlg(sprintf('SimMEEG Software\n\nCopyright (C) 2020  \nDr. Anthony Thomas Herdman and The University of British Columbia\n\nThis program comes with ABSOLUTELY NO WARRANTY\n\nThis program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation\n\nPlease kindly acknowledge Dr. Anthony Herdman at UBC when presenting work from SimMEEG and/or redistributing this software.\n\nThis software is not licensed for clinical use or training.\n\n Liability: The developers, distrubtors, and licensors of this product are not liable in any form or in any way for losses that you, the licensee, may incur from use or re-distribution of this software.\n\n Click "Accept" if you agree to these licensing terms, otherwise click "Decline"'),'License Agreement','Accept','Decline','Accept');
-h.license_flag = 0;
-sm_popup_license_terms;
+if exist('bst','var') % SimMEEG opened from Brainstorm so license already accepted
+    h.license_flag = 1;
+else                  % SimMEEG opened from matlab directly
+    h.license_flag = 0;
+    sm_popup_license_terms;
+end
 
 if h.license_flag==1
     %% %%%%%%%%%%%%%%%%%%%%%%%%%%% Adding paths %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -72,15 +127,27 @@ if h.license_flag==1
             h.data_dir = bst.subj_data_dir;
             h.anat_path = bst.subj_anat_dir;
             h.FieldTrip_dir = bst.FieldTrip_dir;
+            try h.Brainstorm_dir = bst.Brainstorm_dir; catch; h.Brainstorm_dir = uigetdir(h.pwd,'Open Brainstorm Directory'); end
         else                                                            % User-defined paths
             h.data_dir = uigetdir(h.pwd,'Set Data Directory');
             h.anat_path = uigetdir(h.pwd,'Set Anatomy Directory');
             h.FieldTrip_dir = uigetdir(h.pwd,'Open Field Trip Directory');
+            h.Brainstorm_dir = uigetdir(h.pwd,'Open Brainstorm Directory');
         end
     else                                                                % User-defined paths
         h.data_dir = uigetdir(h.pwd,'Set Data Directory');
-        h.anat_path = uigetdir(h.pwd,'Set Anatomy Directory');
-        h.FieldTrip_dir = uigetdir(h.pwd,'Open Field Trip Directory');
+        try
+            sidx = findstr(h.simmeeg_dir,'\'); spath = h.simmeeg_dir(1:sidx(end));
+            h.anat_path = fullfile(spath,'anatomy\'); % exist(h.anat_path,'dir');
+%             h.FieldTrip_dir = fullfile(spath,'fieldtrip-20200911\');
+            h.FieldTrip_dir = fullfile(spath,'fieldtrip-20240201\');
+            h.Brainstorm_dir = fullfile(spath,'brainstorm3\');
+        catch
+            h.anat_path = uigetdir(h.pwd,'Set Anatomy Directory');
+            h.FieldTrip_dir = uigetdir(h.pwd,'Open Field Trip Directory');
+            h.Brainstorm_dir = uigetdir(h.pwd,'Open Brainstorm Directory');
+        end
+        h.bst = []; % SimMEEG start up directly
         h.bst_subj_data_dir ='';
     end
     %% Adding FieldTrip paths
@@ -91,6 +158,15 @@ if h.license_flag==1
     h.FieldTrip_dir_external = genpath([ h.FieldTrip_dir,'\external\']);
     rmpath(h.FieldTrip_dir_external);
     
+    %% Adding Brainstorm Directory
+    if ~isempty(h.Brainstorm_dir)
+        cd(h.Brainstorm_dir)
+        brainstorm setpath
+        cd(h.pwd)
+    else
+        msgbox(sprintf('Brainstorm Path ws not set properly.\nBrainstorms inverse modeling functions will not work.'),'Warning!');
+    end
+    
     %% Initializing UserData
     h.UserData.bkg_clr = [1 1 1];    % background color
     % h.cfg.study.source_locs = [91 48 78; 35 109 78; 151 109 78]; % [primary vis, Left Aud, Right Aud];
@@ -98,10 +174,14 @@ if h.license_flag==1
     % h.tfr_ROI(1)=''; h.tfr_ROI(2)=''; h.tfr_ROI(3)=''; % time-frequency ROIs for each source
     h.src_clr=[0 .6 0; 0 0 1; 1 0 0];     %[.8 .8 1; 1 .8 .8; .8 1 .8];
     h.src_clr2=[.7 .9 .7; .8 .8 1; 1 .8 .8];
-    h.plv_clr = [.7 0 .9; 1 0 1; 1 .6 0];
-    h.plv_clr2 = [.7 0 .9; 1 0 1; 1 .6 0]*.5;
+    h.FA_clr = [0.8 0.6 0]; %[115 77 38]/255;
+    %     h.plv_clr = [.7 0 .9; 1 0 1; 1 .6 0];
+    %     h.plv_clr2 = [.7 0 .9; 1 0 1; 1 .6 0]*.5;
+    h.plv_clr = [0 0 0; 1 0 1; 0 .6 1];
+    h.plv_clr2 = [0 0 0; 1 0 1; 0 .6 1]*.5;
     % h.src_clr=[0 0 0; .8 0 .8; 1 .5 0];     %[.8 .8 1; 1 .8 .8; .8 1 .8];
     % h.src_clr2=[.6 .6 .6; 1 .8 1; 1 .8 .7];
+    h.tfr_clr = [0 0 0; 0 1 .5; 1 .5 0]; % TotPwr, IndPwr, EvkPwr
     
     h.chan_clr = [1 0 .5]*.7; %[1 0 1];
     h.sens_clr = [0 0 0];
@@ -128,27 +208,44 @@ if h.license_flag==1
     % h.bst_subj_data_dir = h.data_dir;
     h.brainstorm_db = h.data_dir;
     h.bst_subj_anat_dir = h.data_dir;
+    h.cfg.study.bst_params.inv_NoiseMethod = {'reg' 'median' 'diag' 'none' 'shrink'};
     h.anatomy = struct('mri','','sens_eeg','','sens_meg','','mesh_volumes',[],'headmodel_eeg_vol','','headmodel_meg_vol','','headmodel_eeg_cortex','','headmodel_meg_cortex','','leadfield_eeg_vol','','leadfield_eeg_cortex','','leadfield_meg_vol','','leadfield_meg_cortex','','sens','','headmodel','','leadfield','','mesh_cortex','');
-    h.real_datadir = ' ';
+    h.real_noise_datadir = ' ';
+    h.real_source_datadir = ' ';
     h.font_size_warndlg = 11;
     h.find_spatiotemp_peaks_flag = 0; % (0) regular peak search inv_soln map (1) spatiotemporal search for peaks in inv_soln source waveforms
     h.false_positive_FaceAlpha = .5;   % FaceAlpha transparency for plotting source locations for false positives
     h.false_positive_lineAlpha = .25;   % lineAlpha transparency for plotting source waves for false positives
-    h.cfg.source.TFR_results = [];   % True Source Time-freq results
+    h.sim_data.cfg.source.TFR_results = [];   % True Source Time-freq results
     h.current_inv_tfr_time_point = []; % time-freq point on inverse-source modleing Tab's TFR plots
     h.current_inv_true_fc_data = []; %
     h.current_inv_peak_fc_data = []; %
     h.fieldtrip_tfr_data = [];
+    h.current_inv_tfr_freq_samp = 1; 
     h.current_fieldtrip_tfr_data = [];
+    h.plot_topo_movie_flag = 0;  % flag for plotting movie of topography
+    h.cfg.study.sensor_noise_cov_exp = 0.273; % default Exponent for Covariance shaping of noise
+    h.run_inv_soln_flag = 0; % flag to designate that user pressed "Run Modeling" so that all calls during this are to reset "hit_idx, ..."
+    h.calc_results_flag = 0; % flag to not update image plots while calculating results  (1)=don't update plots (0)=update plots 
+   
     
+    %% timer function 
+    h.timer_plot_topo_movie = timer('Name','plot_topo_movie',    ...
+            'Period',0.1,                   ...     % This is fixed and should not be changed
+            'StartDelay',0.001,             ...
+            'TasksToExecute',inf,           ...
+            'ExecutionMode','fixedSpacing', ...
+            'BusyMode','drop',        ...
+            'TimerFcn',@plot_topo_data_movie);
+   
     %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% MAIN Figure %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    h.main_fig = figure; set(h.main_fig,'Units','normalized','Position',[.05 .05 .85 .85],'Name',sprintf('SimMEEG v%.1f',version_num),'NumberTitle','off');
+    h.main_fig = figure; set(h.main_fig,'Units','normalized','Position',[.05 .05 .85 .85],'Name',sprintf('BRANE Lab: SimMEEG v%.1f',version_num),'NumberTitle','off');
     addToolbarExplorationButtons(h.main_fig) % Adds zoom, rotate, ... buttons to figure toolbar
     h.main_fig.CloseRequestFcn = @closereq_SimMEEG;
-    
+    h.main_fig.Name = sprintf('BRANE Lab: SimMEEG v%s',version_num); 
     %% %%%%% Panel "Study Parameters" %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    h.study_panel = uipanel(h.main_fig,'Title','Study Parameters','FontSize',12,'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',[.6 0 1],...
+    h.study_panel = uipanel(h.main_fig,'Title','Study & Source Parameters','FontSize',12,'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',[.6 0 1],...
         'Units','normalize','Position',[.005 .865 .86 .13],'FontWeight','bold');
     h.txt_length   = .12;
     h.ui_length    = .05;
@@ -186,7 +283,7 @@ if h.license_flag==1
         'FontSize',10,'HorizontalAlignment','left','String','SNR (dB)');
     h.edit_sens_SNR = uicontrol(h.study_panel,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
         'Position',[h.ui_clmn_pos(1) h.txt_row_pos(4) h.ui_length h.ui_height],...
-        'FontSize',8,'HorizontalAlignment','center','String','-7','Value',1);
+        'FontSize',8,'HorizontalAlignment','center','String','-4','Value',1,'Tooltip',sprintf('SNR (dB) = 20*log10(signal/noise))\n where\n "signal" is RMS of post-event interval \n "noise" is the RMS of the baseline interval'));
     %% Noise Amplitude Percent
     h.edit_noise_amp_perc_txt = uicontrol(h.study_panel,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
         'Position',[h.txt_clmn_pos(2) h.txt_row_pos(2) h.txt_length h.ui_height],...
@@ -212,7 +309,7 @@ if h.license_flag==1
         'Position',[h.txt_clmn_pos(2) h.txt_row_pos(4)-.05 h.txt_length h.ui_height],...
         'FontSize',10,'HorizontalAlignment','left','String','Pink Noise Slope');
     h.edit_pink_noise_slope = uicontrol(h.study_panel,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
-        'Position',[h.ui_clmn_pos(2) h.txt_row_pos(4)-.05 h.ui_length h.ui_height],...
+        'Position',[h.ui_clmn_pos(2) h.txt_row_pos(4)-.05 h.ui_length h.ui_height],'Tag','pink_slope','ToolTip','Value must be between 1.0 to 2.0',...
         'FontSize',10,'HorizontalAlignment','center','String','1 100','Callback',@update_study_cfg);
     %% Baseline Interval
     h.edit_base_int_txt = uicontrol(h.study_panel,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
@@ -310,11 +407,18 @@ if h.license_flag==1
     h.cfg.study.poststim_int=str2num(h.edit_poststim_int.String);    % base line interval for plotting
     h.cfg.study.act_samps = (round( (h.cfg.study.poststim_int(1)-h.cfg.study.lat_sim(1))*h.cfg.study.srate ):round( (h.cfg.study.poststim_int(2)-h.cfg.study.lat_sim(1))*h.cfg.study.srate )) +1;
     h.cfg.study.ctrl_samps = (round( (h.cfg.study.base_int(1)-h.cfg.study.lat_sim(1))*h.cfg.study.srate ):round( (h.cfg.study.base_int(2)-h.cfg.study.lat_sim(1))*h.cfg.study.srate )) +1;
+    %     ss = find(h.cfg.study.lat_sim<=h.cfg.study.poststim_int(1)); sx(1) = ss(end); ss = find(h.cfg.study.lat_sim<=h.cfg.study.poststim_int(2)); sx(2) = ss(end);
+    %     h.cfg.study.act_samps = sx(1):sx(2);
+    %     ss = find(h.cfg.study.lat_sim<=h.cfg.study.base_int(1)); sx(1) = ss(end); ss = find(h.cfg.study.lat_sim<=h.cfg.study.base_int(2)); sx(2) = ss(end);
+    %     h.cfg.study.ctrl_samps = (round( (h.cfg.study.base_int(1)-h.cfg.study.lat_sim(1))*h.cfg.study.srate ):round( (h.cfg.study.base_int(2)-h.cfg.study.lat_sim(1))*h.cfg.study.srate )) +1;
+    %
     h.cfg.study.plot_time_vals=h.cfg.study.plot_time_int(1):1/h.cfg.study.srate:h.cfg.study.plot_time_int(2);
     h.cfg.study.plot_freq_vals=h.cfg.study.plot_freq_int(1):h.cfg.study.plot_freq_int(2);
     h.cfg.study.pink_noise_slope = normrnd(1.8,.1,1); % Arbitrarily set to be randomized with overall mean 1.8  % seemed to best match the slope from a couple of resting-state data from LetterAll study
     if h.cfg.study.pink_noise_slope<1; h.cfg.study.pink_noise_slope=1; elseif h.cfg.study.pink_noise_slope>2; h.cfg.study.pink_noise_slope=2; end
     h.edit_pink_noise_slope.String = sprintf('%.1f',h.cfg.study.pink_noise_slope);
+    h.current_3D_plv_contrasts_listbox_order =[];
+    h.current_3D_plv_contrasts = []; 
     %% Update Study Information
     update_study_cfg;
     
@@ -366,11 +470,27 @@ if h.license_flag==1
     h.sig_ypos=.3; h.sig_pos_size=[.265 .2];
     h.prepost_ypos=.05;
     h.source_edit_length = .035; h.source_edit_height = .03; h.source_edit_ypos  = [.92 .88];
+    %% Source Triplets
+    % delete(h.menu_triplets_txt); delete(h.menu_triplets); 
+    h.menu_triplets_txt = uicontrol(h.tab_power,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[.005 .965 .0275 .03],'FontSize',10,'HorizontalAlignment','right','String','Triplets');
+    h.menu_triplets = uicontrol(h.tab_power,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize',...
+        'Position',[.035 .968 .045 .03],'FontSize',8,'HorizontalAlignment','center','String',{'1'},'Value',1,'Callback',{@update_triplet,'update'});
+    %% Button Add & Delete triplets
+    % delete(h.btn_add_triplets);
+    h.btn_add_triplets = uicontrol(h.tab_power,'BackgroundColor',[1 1 1]*.9,'ForegroundColor',h.src_clr(1,:),'Style','pushbutton','Units','normalize',...
+        'Position',[0.005 .925 .075 .035],'Visible','on','UserData',1,...
+        'FontSize',10,'HorizontalAlignment','center','String','Add Triplet','Callback',{@update_triplet,'add'});
+   % delete(h.btn_del_triplets);
+    h.btn_del_triplets = uicontrol(h.tab_power,'BackgroundColor',[1 1 1]*.9,'ForegroundColor','r','Style','pushbutton','Units','normalize',...
+        'Position',[0.005 .885 .075 .035],'Visible','on','UserData',1,...
+        'FontSize',10,'HorizontalAlignment','center','String','Delete Triplet','Callback',{@update_triplet,'del'});
+
     %% Signal Window Type
     h.menu_sig_win_type_txt = uicontrol(h.tab_power,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
-        'Position',[.005 .965 .1 .03],'FontSize',10,'HorizontalAlignment','right','String','Windowing Type');
+        'Position',[.075 .965 .055 .03],'FontSize',10,'HorizontalAlignment','right','String','Windowing');
     h.menu_sig_win_type = uicontrol(h.tab_power,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize',...
-        'Position',[.11 .968 .08 .03],'FontSize',8,'HorizontalAlignment','center','String',{'Hanning' 'Gaussian' 'Triangular','Blackmann'},'Value',3,'Callback',@update_study_cfg);
+        'Position',[.135 .968 .045 .03],'FontSize',8,'HorizontalAlignment','center','String',{'Hanning' 'Gaussian' 'Triangular','Blackmann'},'Value',3,'Callback',@update_study_cfg);
     h.menu_sig_win_type.Enable='on'; % currently setting it so that it only does triangular windowing
     %% Button Select TFR ROI
     h.btn_ROI_source1 = uicontrol(h.tab_power,'BackgroundColor',[1 1 1]*.9,'ForegroundColor',h.src_clr(1,:),'Style','pushbutton','Units','normalize',...
@@ -429,7 +549,7 @@ if h.license_flag==1
             'FontSize',10,'HorizontalAlignment','right','String','Prepost');
         h.edit_prepost_power_perc(v) = uicontrol(h.tab_power,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.src_clr(v,:),'Style','edit','Units','normalize',...
             'Position',[sum(h.edit_prepost_power_perc_txt(v).Position([1 3]))+.005 h.source_edit_ypos(1) h.source_edit_length h.source_edit_height],...
-            'Tag',[prepost_tag{v} box_type{1}],'FontSize',10,'HorizontalAlignment','center','String','100','Callback',@set_tfr_roi_cfg);
+            'Tag',[prepost_tag{v} box_type{1}],'FontSize',10,'HorizontalAlignment','center','String','50','Callback',@set_tfr_roi_cfg);
         
         %% Signal Evoked Percent
         h.edit_sig_evoked_perc_txt(v) = uicontrol(h.tab_power,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',h.src_clr(v,:),'Units','normalize',...
@@ -802,8 +922,7 @@ if h.license_flag==1
     %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Tab "Simulate M/EEG" %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %% %%%% Panel "Forward Model: Anatomy & Source Locations" on Tab "Simulate M/EEG"  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     h.panel_anatomy = uipanel(h.tab_sim_meeg,'Title','Forward Model: Anatomy & Source Locations','FontSize',10,'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',[0 0 0],...
-        'Units','normalize','Position',[.01 .01 .49 .98],'Visible','on');
-    
+        'Units','normalize','Position',[.01 .01 .49 .98],'Visible','on');    
     %% Load SimMEEG Anatomy.mat - must specific struct (see SimMEEG.m program for details)
     h.btn_load_default_anatomy = uicontrol(h.panel_anatomy,'BackgroundColor',[.2 .2 1]*1,'ForegroundColor',[1 1 1]*1,'Style','pushbutton','Units','normalize',...
         'Position',[.01 .96 .225 .035],...
@@ -822,8 +941,9 @@ if h.license_flag==1
         'FontSize',10,'HorizontalAlignment','center','String','Clear Anatomy','Callback',@sm_clear_SimMEEG_Anatomy);
     %% Save FieldTrip Anatomy.mat - must have mri, sens_eeg, sens_MEG, etc. saved inside the *.mat file
     h.btn_save_SimMEEG_anatomy = uicontrol(h.panel_anatomy,'BackgroundColor',[.8 .9 1],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
-        'Position',[sum(h.btn_load_ft_anatomy.Position([1 3]))+.05 h.btn_clear_SimMEEG_anatomy.Position(2)-.07 .185 .035],...
+        'Position',[sum(h.btn_load_ft_anatomy.Position([1 3]))+.05 h.btn_clear_SimMEEG_anatomy.Position(2)-.04 .185 .035],...
         'FontSize',10,'HorizontalAlignment','center','String','Save Anatomy','Callback',@sm_save_SimMEEG_Anatomy);
+
     %% Anatomy File Name
     h.mri_path_txt = uicontrol(h.panel_anatomy,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
         'Position',[.01 .925 .2 .03],'FontSize',10,'HorizontalAlignment','right','String','Anatomy Folder:');
@@ -843,14 +963,21 @@ if h.license_flag==1
         'FontSize',10,'HorizontalAlignment','left','String','MRI Info:____________________________________');
     %% Load Sensors - created in Field Trip format
     h.btn_load_sensors = uicontrol(h.panel_anatomy,'BackgroundColor',[1 .8 .4],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
-        'Position',[.01 h.btn_load_anatomy.Position(2)-.035 .2 .03],'Visible','on',...
+        'Position',[.01 h.btn_load_anatomy.Position(2)-.035 .1 .03],'Visible','on',...
         'FontSize',10,'HorizontalAlignment','center','String','Load Sensors','Callback',@sm_load_sensors);
+    h.btn_change_sensors = uicontrol(h.panel_anatomy,'BackgroundColor',[1 .8 .4],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
+        'Position',[sum(h.btn_load_sensors.Position([1 3]))+.01 h.btn_load_anatomy.Position(2)-.035 .09 .03],'Visible','on',...
+        'FontSize',10,'HorizontalAlignment','center','String','Locations','Callback',{@sm_change_sensors,'on'});
     h.sensors_txt = uicontrol(h.panel_anatomy,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
-        'Position',[sum(h.btn_load_sensors.Position([1 3]))+.01 h.btn_load_sensors.Position(2) .8-sum(h.btn_load_sensors.Position([1 3]))+.01 .03],...
+        'Position',[h.mri_txt.Position(1) h.btn_load_sensors.Position(2) .8-sum(h.btn_load_sensors.Position([1 3]))+.01 .03],...
         'FontSize',10,'HorizontalAlignment','left','String','Sensor Info:____________________________________');
     h.menu_sens_type = uicontrol(h.panel_anatomy,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize',...
-        'Position',[1-.21 h.sensors_txt.Position(2)+.01 .18 .025],...
+        'Position',[1-.21 h.sensors_txt.Position(2)+.01 .08 .025],...
         'FontSize',8,'HorizontalAlignment','center','String',{'MEG' 'EEG'},'Value',1,'Callback',@menu_head_model_CallBack);
+    h.menu_sens_montage = uicontrol(h.panel_anatomy,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize',...
+        'Position',[sum(h.menu_sens_type.Position([1 3]))+.01 h.menu_sens_type.Position(2) .08 .025],...
+        'FontSize',8,'HorizontalAlignment','center','String',{'151'},'Value',1,'Callback',@menu_sens_montage_CallBack);
+    
     %% Load HeadModel - created in Field Trip format
     h.btn_load_headmodel = uicontrol(h.panel_anatomy,'BackgroundColor',[.8 1 .8],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
         'Position',[.01 h.btn_load_sensors.Position(2)-.035 .2 .03],'Visible','on',...
@@ -871,11 +998,34 @@ if h.license_flag==1
     %     'FontSize',10,'HorizontalAlignment','left','String','Head Model');
     h.menu_head_model = uicontrol(h.panel_anatomy,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize',...
         'Position',[1-.21 h.btn_load_leadfield.Position(2)+.01 .18 .025],...
-        'FontSize',8,'HorizontalAlignment','center','String',{'Volume' 'Cortical Surface'},'Value',1,'Callback',@menu_head_model_CallBack);
-    %% Select Source Locations using bl_set_source_locs.m
+        'FontSize',8,'HorizontalAlignment','center','String',{'Volume' 'Cortical Surface' 'Spheres(Volume)' 'Spheres(Cortical)'},'Value',1,'Callback',@menu_head_model_CallBack);
+    %% Btn: open ARM simulation panel
+    h.btn_ARM_open_panel = uicontrol(h.panel_anatomy,'BackgroundColor',[1 .9 .8],'ForegroundColor',[.3 .225 0],'Style','togglebutton','Units','normalize',...
+        'Position',[.01 h.btn_load_leadfield.Position(2)-.035 .2 .03],'Enable','on','ToolTip','Open panel for Auto-Regressive Model (ARM) Source Simulation',...
+        'FontSize',10,'HorizontalAlignment','center','String','ARM Parameters','Callback',@sm_open_ARM_params);
+    %% Btn: Select Source Locations using bl_set_source_locs.m
     h.btn_select_source_locs = uicontrol(h.panel_anatomy,'BackgroundColor',[1 1 1]*.9,'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
         'Position',[.01 h.btn_load_leadfield.Position(2)-.07 .2 .03],'Enable','inactive',...
-        'FontSize',10,'HorizontalAlignment','center','String','Source Locations','Callback',@select_source_locs);
+        'FontSize',10,'HorizontalAlignment','center','String','Set Source Locations','Callback',@select_source_locs);
+    %% Btn: Randomize locations & Orientations
+    % delete(h.btn_randomize_locs);
+    h.btn_randomize_locs = uicontrol(h.panel_anatomy,'BackgroundColor',[1 1 1]*.9,'ForegroundColor','k','Style','pushbutton','Units','normalize',...
+        'Position',[.01 h.btn_select_source_locs.Position(2)-.035 .2 .03],'Enable','on','ToolTip','Randomizes source locations ',...
+        'FontSize',10,'HorizontalAlignment','center','String','Randomize Locations','Callback',@sm_randomize_source_locs);
+    %% Edit: Dist Thresholds for Randomizing locations
+    % delete(h.edit_randomize_locs_dist_thresh_txt); delete(h.edit_randomize_locs_dist_thresh);
+    h.edit_randomize_locs_dist_thresh_txt = uicontrol(h.panel_anatomy,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[.01 h.btn_randomize_locs.Position(2)-.035 .15 .03],...
+        'FontSize',10,'HorizontalAlignment','left','String','Minimum Distance');
+    h.edit_randomize_locs_dist_thresh = uicontrol(h.panel_anatomy,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[.155 h.btn_randomize_locs.Position(2)-.035 .055 .03],...
+        'FontSize',10,'HorizontalAlignment','center','String','50','ToolTip','Minimum Distance in [X Y Z] directions among ALL sources when randomizing');
+    %% Btn: Load Source Locations & Orientations from file
+    % delete(h.btn_randomize_locs);
+    h.btn_load_locs = uicontrol(h.panel_anatomy,'BackgroundColor',[1 1 1]*.9,'ForegroundColor','k','Style','pushbutton','Units','normalize',...
+        'Position',[.01 h.edit_randomize_locs_dist_thresh.Position(2)-.035 .2 .03],'Enable','on','ToolTip','Randomizes source locations ',...
+        'FontSize',10,'HorizontalAlignment','center','String','Load Locations','Callback',@sm_load_source_locs);
+
     %% Txt for locs ori and amp
     h.source_amp_txt = uicontrol(h.panel_anatomy,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
         'Position',[sum(h.btn_select_source_locs.Position([1 3]))+.01 h.btn_select_source_locs.Position(2) .25 .03],...
@@ -899,33 +1049,33 @@ if h.license_flag==1
     %% Source Locations
     h.edit_source_locs(1) = uicontrol(h.panel_anatomy,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.src_clr(1,:),'Style','edit','Units','normalize',...
         'Tag','edit_source1_ori','Position',[h.source1_txt.Position(1) h.source1_txt.Position(2)-.065 txt_wdth .03],...
-        'FontSize',10,'HorizontalAlignment','center','String','0 0 0','Callback',@edit_source_CallBack);
+        'FontSize',10,'HorizontalAlignment','center','String','-51 7 56','Callback',@edit_source_CallBack);
     h.edit_source_locs(2) = uicontrol(h.panel_anatomy,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.src_clr(2,:),'Style','edit','Units','normalize',...
         'Tag','edit_source2_ori','Position',[h.source2_txt.Position(1) h.source1_txt.Position(2)-.065 txt_wdth .03],...
-        'FontSize',10,'HorizontalAlignment','center','String','0 0 0','Callback',@edit_source_CallBack);
+        'FontSize',10,'HorizontalAlignment','center','String','5 51 58','Callback',@edit_source_CallBack);
     h.edit_source_locs(3) = uicontrol(h.panel_anatomy,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.src_clr(3,:),'Style','edit','Units','normalize',...
         'Tag','edit_source3_ori','Position',[h.source3_txt.Position(1) h.source1_txt.Position(2)-.065 txt_wdth .03],...
-        'FontSize',10,'HorizontalAlignment','center','String','0 0 0','Callback',@edit_source_CallBack);
+        'FontSize',10,'HorizontalAlignment','center','String','4 -48 58','Callback',@edit_source_CallBack);
     %% Source Amplitudes
     h.edit_source_amp(1) = uicontrol(h.panel_anatomy,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.src_clr(1,:),'Style','edit','Units','normalize',...
         'Tag','edit_source1_amp','Position',[h.source1_txt.Position(1) h.source1_txt.Position(2)-.03 txt_wdth .03],...
-        'FontSize',10,'HorizontalAlignment','center','String','30','Callback',@edit_source_CallBack);
+        'FontSize',10,'HorizontalAlignment','center','String','60','Callback',@edit_source_CallBack);
     h.edit_source_amp(2) = uicontrol(h.panel_anatomy,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.src_clr(2,:),'Style','edit','Units','normalize',...
         'Tag','edit_source2_amp','Position',[h.source2_txt.Position(1) h.source1_txt.Position(2)-.03 txt_wdth .03],...
-        'FontSize',10,'HorizontalAlignment','center','String','30','Callback',@edit_source_CallBack);
+        'FontSize',10,'HorizontalAlignment','center','String','60','Callback',@edit_source_CallBack);
     h.edit_source_amp(3) = uicontrol(h.panel_anatomy,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.src_clr(3,:),'Style','edit','Units','normalize',...
         'Tag','edit_source3_amp','Position',[h.source3_txt.Position(1) h.source1_txt.Position(2)-.03 txt_wdth .03],...
-        'FontSize',10,'HorizontalAlignment','center','String','30','Callback',@edit_source_CallBack);
+        'FontSize',10,'HorizontalAlignment','center','String','60','Callback',@edit_source_CallBack);
     %% Source Orientations
     h.edit_source_ori(1) = uicontrol(h.panel_anatomy,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.src_clr(1,:),'Style','edit','Units','normalize',...
         'Tag','edit_source1_ori','Position',[h.source1_txt.Position(1) h.source1_txt.Position(2)-.1 txt_wdth .03],...
-        'FontSize',10,'HorizontalAlignment','center','String','180 0','Callback',@edit_source_CallBack);
+        'FontSize',10,'HorizontalAlignment','center','String','90 0','Callback',@edit_source_CallBack);
     h.edit_source_ori(2) = uicontrol(h.panel_anatomy,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.src_clr(2,:),'Style','edit','Units','normalize',...
         'Tag','edit_source2_ori','Position',[h.source2_txt.Position(1) h.source1_txt.Position(2)-.1 txt_wdth .03],...
-        'FontSize',10,'HorizontalAlignment','center','String','245 305','Callback',@edit_source_CallBack);
+        'FontSize',10,'HorizontalAlignment','center','String','305 245','Callback',@edit_source_CallBack);
     h.edit_source_ori(3) = uicontrol(h.panel_anatomy,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.src_clr(3,:),'Style','edit','Units','normalize',...
         'Tag','edit_source3_ori','Position',[h.source3_txt.Position(1) h.source1_txt.Position(2)-.1 txt_wdth .03],...
-        'FontSize',10,'HorizontalAlignment','center','String','295 305','Callback',@edit_source_CallBack);
+        'FontSize',10,'HorizontalAlignment','center','String','245 305','Callback',@edit_source_CallBack);
     %% Menu Orientations normal to surface
     h.menu_ori_normal_txt = uicontrol(h.panel_anatomy,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
         'Position',[h.edit_source_ori(1).Position(1) h.edit_source_ori(1).Position(2)-.04 .25 .025],...
@@ -959,61 +1109,220 @@ if h.license_flag==1
         'FontSize',10,'HorizontalAlignment','center','String','Scalp Transparency');
     h.slider_transparency_scalp = uicontrol(h.panel_anatomy,'BackgroundColor',[0.8980 0.7549 0.5431],'ForegroundColor',[1 1 1]*0,'Style','slider','Units','normalize',...
         'Position',[h.slider_transparency_scalp_txt.Position(1) h.slider_transparency_scalp_txt.Position(2)-.0275 h.slider_transparency_scalp_txt.Position(3) .025],...
-        'FontSize',8,'Value',0.25,'Max',1,'Min',0,'Callback',{@set_transparency,'scalp'});
-    
+        'FontSize',8,'Value',0.1,'Max',1,'Min',0,'Callback',{@set_transparency,'scalp'});
+    addlistener(h.slider_transparency_scalp,'Value','PostSet',@(src,evt)set_transparency(src,evt,'scalp'));
+   
     % Sliders: Transparencies for BRAIN
     h.slider_transparency_brain_txt = uicontrol(h.panel_anatomy,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
         'Position',[.01 h.slider_transparency_scalp.Position(2)-.03 h.slider_transparency_scalp.Position(3) h.slider_transparency_scalp_txt.Position(4)],...
         'FontSize',10,'HorizontalAlignment','center','String','Brain Transparency');
     h.slider_transparency_brain = uicontrol(h.panel_anatomy,'BackgroundColor',[1 1 1]*.9,'ForegroundColor',[1 1 1]*0,'Style','slider','Units','normalize',...
         'Position',[h.slider_transparency_brain_txt.Position(1) h.slider_transparency_brain_txt.Position(2)-.0275 h.slider_transparency_brain_txt.Position(3) .025],...
-        'FontSize',8,'Value',0.25,'Max',1,'Min',0,'Callback',{@set_transparency,'brain'});
-    
+        'FontSize',8,'Value',0.1,'Max',1,'Min',0,'Callback',{@set_transparency,'brain'});
+     addlistener(h.slider_transparency_brain,'Value','PostSet',@(src,evt)set_transparency(src,evt,'brain'));
+   
     % Sliders: Transparencies for TOPO
     h.slider_transparency_topo_txt = uicontrol(h.panel_anatomy,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
         'Position',[.01 h.slider_transparency_brain.Position(2)-.03 h.slider_transparency_brain.Position(3) h.slider_transparency_brain_txt.Position(4)],...
         'FontSize',10,'HorizontalAlignment','center','String','Topo Transparency');
     h.slider_transparency_topo = uicontrol(h.panel_anatomy,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','slider','Units','normalize',...
         'Position',[h.slider_transparency_topo_txt.Position(1) h.slider_transparency_topo_txt.Position(2)-.0275 h.slider_transparency_topo_txt.Position(3) .025],...
-        'FontSize',8,'Value',0.25,'Max',1,'Min',0,'Callback',{@set_transparency,'topo'});
-    
+        'FontSize',8,'Value',0.1,'Max',1,'Min',0,'Callback',{@set_transparency,'topo'});
+      addlistener(h.slider_transparency_topo,'Value','PostSet',@(src,evt)set_transparency(src,evt,'topo'));
+   
     % Sliders: Transparencies for HEADMODEL
     h.slider_transparency_hdm_txt = uicontrol(h.panel_anatomy,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
         'Position',[.01 h.slider_transparency_topo.Position(2)-.03 h.slider_transparency_topo.Position(3) h.slider_transparency_topo_txt.Position(4)],...
         'FontSize',10,'HorizontalAlignment','center','String','HDM Transparency');
     h.slider_transparency_hdm = uicontrol(h.panel_anatomy,'BackgroundColor',[1 .8 1],'ForegroundColor',[1 1 1]*0,'Style','slider','Units','normalize',...
         'Position',[h.slider_transparency_hdm_txt.Position(1) h.slider_transparency_hdm_txt.Position(2)-.0275 h.slider_transparency_hdm_txt.Position(3) .025],...
-        'FontSize',8,'Value',0.25,'Max',1,'Min',0,'Callback',{@set_transparency,'hdm'});
-    
+        'FontSize',8,'Value',0.1,'Max',1,'Min',0,'Callback',{@set_transparency,'hdm'});
+       addlistener(h.slider_transparency_hdm,'Value','PostSet',@(src,evt)set_transparency(src,evt,'hdm'));
+   
     % Sliders: Transparencies for LEADFIELD dipoles
     h.slider_transparency_lf_grids_txt = uicontrol(h.panel_anatomy,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
         'Position',[.01 h.slider_transparency_hdm.Position(2)-.03 h.slider_transparency_hdm.Position(3) h.slider_transparency_hdm_txt.Position(4)],...
         'FontSize',10,'HorizontalAlignment','center','String','LF Transparency');
     h.slider_transparency_lf_grids = uicontrol(h.panel_anatomy,'BackgroundColor',[.8 1 .8],'ForegroundColor',[1 1 1]*0,'Style','slider','Units','normalize',...
         'Position',[h.slider_transparency_lf_grids_txt.Position(1) h.slider_transparency_lf_grids_txt.Position(2)-.0275 h.slider_transparency_lf_grids_txt.Position(3) .025],...
-        'FontSize',8,'Value',0.25,'Max',1,'Min',0,'Callback',{@set_transparency,'lf'});
+        'FontSize',8,'Value',0.1,'Max',1,'Min',0,'Callback',{@set_transparency,'lf'});
+       addlistener(h.slider_transparency_lf_grids,'Value','PostSet',@(src,evt)set_transparency(src,evt,'lf'));
     %% Button:  Light on/off
     h.toggle_light_OnOff_anat = uicontrol(h.panel_anatomy,'BackgroundColor',[1 1 1]*.9,'ForegroundColor',[1 0 0],'Style','togglebutton','Units','normalize',...
         'Position',[h.slider_transparency_lf_grids.Position(1) h.slider_transparency_lf_grids.Position(2)-.05 .15 .035],...
         'FontSize',8,'Value',0,'String', 'Light Off','Callback',@toggle_light_OnOff_axes_anatomy);
     %% Axes Anatomy
-    h.axes_anatomy = axes(h.panel_anatomy,'Position',[.3 .05 .5 .35]); axis off;
+    h.axes_anatomy = axes(h.panel_anatomy,'Position',[.3 .05 .5 .35],'View',[-90 90]); axis off;
     % slider topo caxis scaling relative to yscale
     %% Sliders for Topo Scale
     h.slider_topo_scale = uicontrol(h.panel_anatomy,'BackgroundColor',[1 1 1]*.9,'ForegroundColor',[1 1 1]*0,'Style','slider','Units','normalize',...
-        'Position',[.925 .2 .03 .2],...
+        'Position',[.925 .2 .03 .2],'UserData','slider_topo_scale',...
         'FontSize',8,'Value',1,'Max',1,'Min',0.01,'Callback',@set_topo_caxis);
+    h.slider_topo_scale_text_val = uicontrol(h.panel_anatomy,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[h.slider_topo_scale.Position(1)-.08 sum(h.slider_topo_scale.Position(2))  .06 .025],...
+        'FontSize',10,'HorizontalAlignment','right','String','');
+    addlistener(h.slider_topo_scale,'Value','PostSet',@(src,evt)sm_update_slider_text_value(src,evt,h.slider_topo_scale,h.slider_topo_scale_text_val));
+    
     h.slider_topo_scale_txt = uicontrol(h.panel_anatomy,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
         'Position',[h.slider_topo_scale.Position(1)-.02 h.slider_topo_scale.Position(2)-.06  .08 .05],...
         'FontSize',10,'HorizontalAlignment','center','String','Topo Scale');
     h.slider_topo_scale_text_max = uicontrol(h.panel_anatomy,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
         'Position',[sum(h.slider_topo_scale.Position([1 3]))-.05 sum(h.slider_topo_scale.Position([2 4]))+.01  .08 .025],...
         'FontSize',10,'HorizontalAlignment','center','String',['100 ' char(181) 'V']);
-    h.slider_topo_scale_text_val = uicontrol(h.panel_anatomy,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
-        'Position',[h.slider_topo_scale.Position(1)-.08 sum(h.slider_topo_scale.Position([2]))  .08 .025],...
-        'FontSize',10,'HorizontalAlignment','right','String','');
     
-    %% %%%% Panel "Project Source Data --> Sensors" on Tab "Simulate M/EEG" %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
+    %% %%%% Sub-Panel "Change Sensors" %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    h.panel_sensor_change = uipanel(h.tab_sim_meeg,'Title','Change Sensors','FontSize',10,'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',[0 0 0],...
+        'Units','normalize','Position',[.5 .01 .49 .98],'Visible','off');
+    %% UITABLE of sensors (editable)
+    data = repmat({'nan'},1,5);
+    h.sens_table = uitable(h.panel_sensor_change,'Data', data, 'ColumnName', {'Label' 'X' 'Y' 'Z' 'Type'},'Units','normalized','Position',[.05 .05 .45 .9],'ColumnEditable',true(1,4));
+    %% Txt: Title
+    h.panel_sensor_heading_txt = uicontrol(h.panel_sensor_change,'Style','text', 'BackgroundColor',h.panel_sensor_change.BackgroundColor,'Foregroundcolor','k','Units','normalize',...
+        'Position',[.05 .95 .8 .025],'FontSize',10,'HorizontalAlignment','left','String',sprintf('Locations for %s sensors. Edit this table and click "Apply"',h.menu_sens_type.String{h.menu_sens_type.Value}));
+    %% Btn Close Panel
+    h.panel_sensor_btn_close = uicontrol(h.panel_sensor_change,'BackgroundColor',[1 .8 .8],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
+        'Position',[.89 .965 .1 .03],'Visible','on',...
+        'FontSize',10,'HorizontalAlignment','center','String','Close','Callback',{@sm_sensor_panel_close,''});
+    %% Btn for loading excel locations
+    h.panel_sensor_btn_load_sensors_excel = uicontrol(h.panel_sensor_change,'BackgroundColor',[1 .8 .4],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
+        'Position',[.89 .925 .1 .03],'Visible','on',...
+        'FontSize',10,'HorizontalAlignment','center','String','Load Excel','Callback',@sm_load_sensors_excel);
+    %% Btn Apply
+    h.panel_sensor_btn_apply = uicontrol(h.panel_sensor_change,'BackgroundColor',[.8 1 .8],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
+        'Position',[.89 .845 .1 .03],'Visible','on',...
+        'FontSize',10,'HorizontalAlignment','center','String','Apply','Callback',{@sm_apply_sensors,''});
+    %% Btn Re-Align
+    h.panel_sensor_btn_realign = uicontrol(h.panel_sensor_change,'BackgroundColor',[.9 .9 1],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
+        'Position',[.89 .885 .1 .03],'Visible','on',...
+        'FontSize',10,'HorizontalAlignment','center','String','Re-Align','Callback',{@sm_realign_sens,''});
+    
+    %% %%%% Sub-Panel: Select "Add ARM to Existing" " Generate "ARM only"
+    %% %%%%% Panel "Auto-Regressive Model (ARM) Parameters" %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % delete(h.panel_ARM_params);
+    ysep = .13; font_size = 9;
+    h.panel_ARM_params = uipanel(h.panel_anatomy,'Title','Auto-Regressive Model (ARM) Source Simulation Parameters','FontSize',10,'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',[.6 .45 0],...
+        'Units','normalize','Position',[.005 h.btn_load_leadfield.Position(2) .99 .248],'Visible','off');
+    %% Menu: ARM Combine Source Data?
+    h.menu_ARM_add_txt = uicontrol(h.panel_ARM_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[h.txt_clmn_pos(1) .85 .175 .12],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Combine Source Data');
+    h.menu_ARM_add = uicontrol(h.panel_ARM_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize',...
+        'Position',[sum(h.menu_ARM_add_txt.Position([1 3])) h.menu_ARM_add_txt.Position(2) .175 .12],...
+        'FontSize',8,'HorizontalAlignment','center','String',{'Synthetic Only' 'ARM only' 'Add Waveforms' 'Concatenate Sources'},...
+        'Value',1,'Callback',@sm_set_ARM_params);
+    %% Edit: ARM Num Sources
+    h.edit_ARM_num_sources_txt = uicontrol(h.panel_ARM_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[h.txt_clmn_pos(1) h.menu_ARM_add_txt.Position(2)-ysep-.02 h.menu_ARM_add_txt.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Number Sources');
+    h.edit_ARM_num_sources = uicontrol(h.panel_ARM_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[h.menu_ARM_add.Position(1) h.edit_ARM_num_sources_txt.Position(2) h.menu_ARM_add.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','center','String','3','Callback',{@sm_set_ARM_params,'Locations'});
+    %% Edit: Arm Order
+    h.edit_ARM_order_txt = uicontrol(h.panel_ARM_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[h.txt_clmn_pos(1) h.edit_ARM_num_sources_txt.Position(2)-ysep h.menu_ARM_add_txt.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','ARM Order');
+    h.edit_ARM_order = uicontrol(h.panel_ARM_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[h.menu_ARM_add.Position(1) h.edit_ARM_order_txt.Position(2) h.menu_ARM_add.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','center','String','10');
+    %% Edit: ARM Num Interactions
+    h.edit_ARM_num_interactions_txt = uicontrol(h.panel_ARM_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[h.txt_clmn_pos(1) h.edit_ARM_order_txt.Position(2)-ysep h.menu_ARM_add_txt.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Number Interactions');
+    h.edit_ARM_num_interactions = uicontrol(h.panel_ARM_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[h.menu_ARM_add.Position(1) h.edit_ARM_num_interactions_txt.Position(2) h.menu_ARM_add.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','center','String','3','Callback',{@sm_set_ARM_params,'Num Interactions'});
+    %% Edit: ARM Source Amp Range
+    h.edit_ARM_amp_range_txt = uicontrol(h.panel_ARM_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[h.txt_clmn_pos(1) h.edit_ARM_num_interactions_txt.Position(2)-ysep h.menu_ARM_add_txt.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Amplitude Range (nA)');
+    h.edit_ARM_amp_range = uicontrol(h.panel_ARM_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[h.menu_ARM_add.Position(1) h.edit_ARM_amp_range_txt.Position(2) h.menu_ARM_add.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','center','String','30 100');
+    %% Menu: ARM Source Locations
+    h.menu_ARM_source_locs_txt = uicontrol(h.panel_ARM_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[h.txt_clmn_pos(1) h.edit_ARM_amp_range_txt.Position(2)-ysep-.01 h.menu_ARM_add_txt.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Source Locations');
+    h.menu_ARM_source_locs = uicontrol(h.panel_ARM_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize',...
+        'Position',[sum(h.menu_ARM_source_locs_txt.Position([1 3])) h.menu_ARM_source_locs_txt.Position(2)  h.menu_ARM_add.Position(3:4)],...
+        'FontSize',8,'HorizontalAlignment','center','String',{'Random' 'Load File'},...
+        'Value',1,'Callback',{@sm_set_ARM_params,'Locations'});
+    %% Menu: ARM Orientation Constraint
+    h.menu_ARM_ori_constraint_txt = uicontrol(h.panel_ARM_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[h.txt_clmn_pos(1) h.menu_ARM_source_locs_txt.Position(2)-ysep-.02 h.menu_ARM_add_txt.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Orientation Constraint');
+    h.menu_ARM_ori_constraint = uicontrol(h.panel_ARM_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize',...
+        'Position',[sum(h.menu_ARM_ori_constraint_txt.Position([1 3])) h.menu_ARM_ori_constraint_txt.Position(2) h.menu_ARM_add.Position(3:4)],...
+        'FontSize',8,'HorizontalAlignment','center','String',{'Random' 'Cortical Surface'},...
+        'Value',1,'Callback',{@sm_set_ARM_params,'Ori Constraint'});
+    %% Edit: ARM Frequncy Range
+    h.edit_ARM_freq_range_txt = uicontrol(h.panel_ARM_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[sum(h.menu_ARM_add.Position([1 3]))+.02 h.menu_ARM_add.Position(2) .15 h.menu_ARM_add_txt.Position(4)],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Frequency Range');
+    h.edit_ARM_freq_range = uicontrol(h.panel_ARM_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[sum(h.edit_ARM_freq_range_txt.Position([1 3]))+.01 h.edit_ARM_freq_range_txt.Position(2) .075 h.menu_ARM_add.Position(4)],...
+        'FontSize',font_size,'HorizontalAlignment','center','String','1 100','ToolTip',sprintf('Frequency Range to filter White Noise before calculating ARM'));
+    %% Edit: ARM Signal Percent Range
+    h.edit_ARM_sig_perc_range_txt = uicontrol(h.panel_ARM_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[sum(h.menu_ARM_add.Position([1 3]))+.02 h.edit_ARM_freq_range.Position(2)-ysep .15 h.menu_ARM_add_txt.Position(4)],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Signal (%) Range');
+    h.edit_ARM_sig_perc_range = uicontrol(h.panel_ARM_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[sum(h.edit_ARM_sig_perc_range_txt.Position([1 3]))+.01 h.edit_ARM_sig_perc_range_txt.Position(2) .075 h.menu_ARM_add.Position(4)],...
+        'FontSize',font_size,'HorizontalAlignment','center','String','50 100','ToolTip',sprintf('Randomly selecting a percent of ARM signal for each source\nrelative to 100%% when adding to Synthetic waveforms \nor multiply this %% by the randomized ARM Source Amplitudes'));
+    %% Edit: ARM PrePost Percent Range
+    h.edit_ARM_prepost_perc_range_txt = uicontrol(h.panel_ARM_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[sum(h.menu_ARM_add.Position([1 3]))+.02 h.edit_ARM_sig_perc_range.Position(2)-ysep h.edit_ARM_sig_perc_range_txt.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Prepost (%) Range');
+    h.edit_ARM_prepost_perc_range = uicontrol(h.panel_ARM_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[sum(h.edit_ARM_prepost_perc_range_txt.Position([1 3]))+.01 h.edit_ARM_prepost_perc_range_txt.Position(2) h.edit_ARM_sig_perc_range.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','center','String','10 50','ToolTip',sprintf('Randomly selecting a percent of ARM PrePost for each source\nrelative to 100%% when adding to Synthetic waveforms \nor multiply this %% by the randomized ARM Source Amplitudes'));
+    %% Edit: ARM Signal Latency [start_time end_time]
+    h.edit_ARM_sig_latency_txt = uicontrol(h.panel_ARM_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[sum(h.menu_ARM_add.Position([1 3]))+.02 h.edit_ARM_prepost_perc_range.Position(2)-ysep h.edit_ARM_sig_perc_range_txt.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Signal Latency (sec)');
+    h.edit_ARM_sig_latency = uicontrol(h.panel_ARM_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[sum(h.edit_ARM_sig_latency_txt.Position([1 3]))+.01 h.edit_ARM_sig_latency_txt.Position(2) h.edit_ARM_sig_perc_range.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','center','String','0 0.5','ToolTip',sprintf('Set Signal Latency Time for modulating ARM amplitudes [start_time end_time]'));
+    %% Edit: ARM Signal Rise/Fall Time
+    h.edit_ARM_sig_risetime_txt = uicontrol(h.panel_ARM_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[sum(h.menu_ARM_add.Position([1 3]))+.02 h.edit_ARM_sig_latency.Position(2)-ysep h.edit_ARM_sig_perc_range_txt.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Rise/Fall Time (sec)');
+    h.edit_ARM_sig_risetime = uicontrol(h.panel_ARM_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[sum(h.edit_ARM_sig_risetime_txt.Position([1 3]))+.01 h.edit_ARM_sig_risetime_txt.Position(2) h.edit_ARM_sig_perc_range.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','center','String','0.15','ToolTip',sprintf('Set Rise/Fall Time for modulating ARM amplitudes'));
+    %% Menu: ARM Windowing Type
+    % delete(h.menu_ARM_win_type_txt); delete(h.menu_ARM_win_type); 
+    h.menu_ARM_win_type_txt = uicontrol(h.panel_ARM_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[sum(h.menu_ARM_add.Position([1 3]))+.02 h.edit_ARM_sig_risetime_txt.Position(2)-ysep-.02 .1 h.edit_ARM_sig_perc_range_txt.Position(4)],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Window Type');
+    h.menu_ARM_win_type = uicontrol(h.panel_ARM_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize',...
+        'Position',[sum(h.menu_ARM_win_type_txt.Position([1 3]))+.02 h.menu_ARM_win_type_txt.Position(2)+.02 sum(h.edit_ARM_sig_risetime.Position([1 3]))-(sum(h.menu_ARM_win_type_txt.Position([1 3]))+.02) h.edit_ARM_sig_perc_range_txt.Position(4)],...
+        'FontSize',8,'HorizontalAlignment','center','String',{'Hanning' 'Gaussian' 'Triangular','Blackmann'},'Value',2);
+    %% Edit: ARM Min Spatial Distance
+    h.edit_ARM_min_spatial_dist_txt = uicontrol(h.panel_ARM_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[sum(h.menu_ARM_add.Position([1 3]))+.02 h.menu_ARM_win_type_txt.Position(2)-ysep h.edit_ARM_sig_perc_range_txt.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Min Distance (mm)');
+    h.edit_ARM_min_spatial_dist = uicontrol(h.panel_ARM_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[sum(h.edit_ARM_min_spatial_dist_txt.Position([1 3]))+.01 h.edit_ARM_min_spatial_dist_txt.Position(2) h.edit_ARM_sig_perc_range.Position(3:4)],...
+        'FontSize',font_size,'HorizontalAlignment','center','String','26','ToolTip',sprintf('Minimum spatial Euclidean distance allowed among all sources\nNote: 15mm any direction = 26 mm Euclidean distance'));
+    %% Btn: Update ARM Parameters
+    % delete(h.btn_ARM_update_params);
+    h.btn_ARM_update_params = uicontrol(h.panel_ARM_params,'BackgroundColor',[1 .9 .7],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
+        'Position',[sum(h.edit_ARM_freq_range.Position([1 3]))+.02 h.edit_ARM_freq_range.Position(2) .125 h.edit_ARM_sig_perc_range.Position(4)],...
+        'FontSize',8,'HorizontalAlignment','center','String','Update ARM','Value',1,'Callback',{@sm_set_ARM_params,'Locations'});
+    %% Btn: Change Windowing Parameters for each source by calling up a larger panel to the right.
+    % delete(h.btn_ARM_change_source_params);
+    h.btn_ARM_change_source_params = uicontrol(h.panel_ARM_params,'BackgroundColor',[.9 1 .9],'ForegroundColor',[1 1 1]*0,'Style','togglebutton','Units','normalize',...
+        'Position',[sum(h.edit_ARM_freq_range.Position([1 3]))+.02 h.btn_ARM_update_params.Position(2)-ysep-.02 .125 h.edit_ARM_sig_perc_range.Position(4)],...
+        'FontSize',8,'HorizontalAlignment','center','String','Edit Params','Value',0,'Callback',{@sm_ARM_change_source_params,'Open'});
+    %% Axes plotting ARM interactions Matrix
+    % delete(h.axes_ARM_interactions);
+    h.axes_ARM_interactions = axes(h.panel_ARM_params,'Units','normalize',...
+        'Position',[.81 .2 .175 .675]);
+    h.axes_ARM_interactions.Title.String = 'ARM Interactions';
+    xlabel(h.axes_ARM_interactions,'Source #'); ylabel(h.axes_ARM_interactions,'Source #');    
+    
+    %% %%%% Panel "Forward Model: Project Source Data --> Sensors" on Tab "Simulate M/EEG" %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     h.panel_sim_data = uipanel(h.tab_sim_meeg,'Title','Forward Model: Project Source Data --> Sensors','FontSize',10,'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',[0 0 0],...
         'Units','normalize','Position',[.5 .01 .49 .98],'Visible','on');
     %% Subpanel Generate Sensor Noise
@@ -1025,7 +1334,7 @@ if h.license_flag==1
         'FontSize',10,'HorizontalAlignment','left','String','Noise Projection');
     h.menu_noise_projection = uicontrol(h.panel_sens_noise,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize',...
         'Position',[sum(h.menu_noise_projection_txt.Position([1 3]))+.01 h.menu_noise_projection_txt.Position(2) .25 .2],...
-        'FontSize',8,'HorizontalAlignment','center','String',{'Synthetic Sensor Noise' 'Synthetic Brain Noise' 'Synthetic MVAR/GAN Noise (not implemented yet)' 'Real Sensor Noise'},...
+        'FontSize',8,'HorizontalAlignment','center','String',{'Synthetic Sensor Noise' 'Synthetic Brain Noise' 'Synthetic MVAR/GAN Noise (not implemented yet)' 'Real Sensor Noise' 'Real Resting State'},...
         'Value',1,'Callback',@menu_noise_projection_CallBack);
     %     'FontSize',8,'HorizontalAlignment','center','String',{'Sim Sensor' 'Sim Brain' 'Real Sensor' 'GAN Sensor'},'Value',1,'Callback',@menu_noise_projection_CallBack);
     %% btn Sim Brain Noise
@@ -1041,60 +1350,154 @@ if h.license_flag==1
         'Position',[sum(h.btn_get_real_noise_dataset.Position([1 3]))+.02 h.btn_get_real_noise_dataset.Position(2) .175 .23],...
         'Visible','on','FontSize',8,'HorizontalAlignment','center','String','Randomize Phase','Value',1,'Callback',@sm_fft_randomize_phase);
     
+     %% %%%%% Sub-Panel "Changing ARM Source Parameters" %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % delete(h.panel_ARM_source_params);
+    ysep = .13; font_size = 9;
+    h.panel_ARM_source_params = uipanel(h.tab_sim_meeg,'Title','ARM Source Parameters','FontSize',10,'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',[.6 .45 0],...
+        'Units','normalize','Position',[h.panel_sim_data.Position],'Visible','off');
+    %% Txt: Title
+    h.table_ARM_source_params_txt = uicontrol(h.panel_ARM_source_params,'Style','text', 'BackgroundColor',h.panel_sensor_change.BackgroundColor,'Foregroundcolor','k','Units','normalize',...
+        'Position',[.005 .925 .8 .025],'FontSize',10,'HorizontalAlignment','left','String',sprintf('ARM Source Parameters for all ARM sources. Edit these tables and click "Apply"'));
+    %% UITABLE of ARM Source parameters (editable)
+    data = repmat({'nan'},1,12); % Clmns = [vidx SignalAmplitude signal% Prepost% signalStartTime signalEndTime SignalRiseFall]
+    clmn_width = repmat({60},size(data)); clmn_width(2:6) = {60}; clmn_width(10:12) = {85};
+    h.table_ARM_source_params = uitable(h.panel_ARM_source_params,'Data', data, 'ColumnName', {'LF Index' 'X' 'Y' 'Z' 'Ori Az' 'Ori El' 'Amp(nA)' 'Signal%' 'Prepost%' 'Start(sec)' 'End(sec)' 'Rise/Fall(sec)'},...
+        'Units','normalized','Position',[.005 .02 .99 .9],'ColumnEditable',[false(1) true(1,11)],'ColumnWidth',clmn_width);
+    %% Btn Apply
+    h.btn_apply_ARM_source_params = uicontrol(h.panel_ARM_source_params,'BackgroundColor',[.8 1 .8],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
+        'Position',[.025 .965 .1 .03],'Visible','on',...
+        'FontSize',10,'HorizontalAlignment','center','String','Apply','Callback',{@sm_ARM_change_source_params,'Apply'});
+    %% Btn for saving AMR Params to excel
+    h.btn_load_ARM_source_params_excel  = uicontrol(h.panel_ARM_source_params,'BackgroundColor',[.9 1 1],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
+        'Position',[.15 .965 .1 .03],'Visible','on',...
+        'FontSize',10,'HorizontalAlignment','center','String','Load Excel','Callback',{@sm_ARM_change_source_params,'Load Excel'});
+    %% Btn for saving AMR Params to excel
+    h.btn_save_ARM_source_params_excel  = uicontrol(h.panel_ARM_source_params,'BackgroundColor',[1 .9 .8],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
+        'Position',[.275 .965 .1 .03],'Visible','on',...
+        'FontSize',10,'HorizontalAlignment','center','String','Save Excel','Callback',{@sm_ARM_change_source_params,'Save Excel'});
+     %% Txt: Saved ARM Params File
+    h.saved_ARM_source_params_txt = uicontrol(h.panel_ARM_source_params,'Style','text', 'BackgroundColor',h.panel_sensor_change.BackgroundColor,'Foregroundcolor','k','Units','normalize',...
+        'Position',[sum(h.btn_save_ARM_source_params_excel.Position([1 3]))+.02 .965 1-(sum(h.btn_save_ARM_source_params_excel.Position([1 3]))+.02)-.01 .025],'FontSize',10,'HorizontalAlignment','left','String','Saved ARM Parameter File: ');
+   
+    %% sub-subpanel Synthetic Noise Parameters
+    % delete(h.panel_synthetic_noise)
+    h.panel_synthetic_noise = uipanel(h.panel_sens_noise,'Title','Synthetic Noise Parameters','FontSize',10,'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',[0 0 0],...
+        'Units','normalized','Position',[.005 .01 .5 .77],'Visible','on');
+    txt_width = .3; txt_height = .25; box_width = .125; box_height = .25; font_size = 9; font_size2 = 8;
+    txt_xpos = [.01 .55]; txt_ypos = fliplr([0.051    0.45    0.7]);
+    box_xpos = [.4 .85]; box_ypos = txt_ypos;
+    %% Noise Frequncy Band
+    h.edit_synthetic_noise_freqs_txt = uicontrol(h.panel_synthetic_noise,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[txt_xpos(1) txt_ypos(1) txt_width txt_height],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Noise Band (Hz)');
+    h.edit_synthetic_noise_freqs = uicontrol(h.panel_synthetic_noise,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[box_xpos(1) box_ypos(1) box_width box_height],...
+        'FontSize',font_size,'HorizontalAlignment','center','String','1 100','Callback',@update_study_cfg);
+    %% Noise Covariance Selected
+    h.menu_synthetic_noise_cov_type_txt = uicontrol(h.panel_synthetic_noise,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[txt_xpos(1) txt_ypos(2)-.05 txt_width txt_height],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Noise Shaping');
+    h.menu_synthetic_noise_cov_type = uicontrol(h.panel_synthetic_noise,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize',...
+        'Position',[box_xpos(1)-.1 box_ypos(2)+.025 box_width+.1 box_height-.05],...
+        'FontSize',font_size2,'HorizontalAlignment','center','String',{'none' 'spatial (Cov)' 'temporal (ARM)' 'spatiotemporal (ARM)' 'real spatial (Cov)'},'Value',1,'Callback',@update_study_cfg);
+    %% Noise Covariance Exponent
+    h.edit_synthetic_noise_cov_exp_txt = uicontrol(h.panel_synthetic_noise,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[txt_xpos(1) txt_ypos(3) txt_width txt_height],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Covariance Exponent','Visible','on');
+    h.edit_synthetic_noise_cov_exp = uicontrol(h.panel_synthetic_noise,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[box_xpos(1) box_ypos(3) box_width box_height],'ToolTip','Covariance Exponent for shaping noise from random covariance distribution using "random(CovExp,#chan,#chan)"',...
+        'FontSize',font_size,'HorizontalAlignment','center','String','0.273','Value',1,'Callback',@update_study_cfg,'Visible','on');
+
+    %% Noise type
+    % delete(h.menu_synthetic_noise_flag_txt); delete(h.menu_synthetic_noise_flag);
+    h.menu_synthetic_noise_flag_txt = uicontrol(h.panel_synthetic_noise,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[txt_xpos(2) txt_ypos(1)+.025 txt_width txt_height],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Noise Type');
+    h.menu_synthetic_noise_flag = uicontrol(h.panel_synthetic_noise,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize',...
+        'Position',[box_xpos(2)-.1 box_ypos(1)+.15 box_width+.1 box_height-.05],...
+        'FontSize',font_size2,'HorizontalAlignment','center','String',{'Broad Band' 'Narrow Band' 'Notched Band' 'Pink/Brown'},'Value',2,'Callback',@update_study_cfg);
+    %% Pink Noise Slope
+    % delete(h.edit_synthetic_pink_noise_slope_txt); delete(h.edit_synthetic_pink_noise_slope); 
+    h.edit_synthetic_pink_noise_slope_txt = uicontrol(h.panel_synthetic_noise,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[txt_xpos(2) txt_ypos(2)-.075 txt_width txt_height],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','Pink Noise Slope');
+    h.edit_synthetic_pink_noise_slope = uicontrol(h.panel_synthetic_noise,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[box_xpos(2) box_ypos(2)-.075 box_width box_height],'Tag','synth_pink_slope','ToolTip','Value must be between 1.0 to 2.0',...
+        'FontSize',font_size,'HorizontalAlignment','center','String','1.00','Callback',@update_study_cfg);
+    %% ARM Noise Interaction
+    % delete(h.edit_synthetic_noise_ARM_interaction_txt); delete(h.edit_synthetic_noise_ARM_interaction); 
+    h.edit_synthetic_noise_ARM_interaction_txt = uicontrol(h.panel_synthetic_noise,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[txt_xpos(2) txt_ypos(3) txt_width txt_height],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','# ARM Interactions','Visible','off');
+    h.edit_synthetic_noise_ARM_interaction = uicontrol(h.panel_synthetic_noise,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[box_xpos(2) box_ypos(3) box_width box_height],'ToolTip','Number of randomly selected interactions for Auto-Regressive Model (ARM) among sensors',...
+        'FontSize',font_size,'HorizontalAlignment','center','String','8','Value',1,'Callback',@update_study_cfg,'Visible','off');
+    %% ARM Noise Order
+    % delete(h.edit_synthetic_noise_ARM_order_txt); delete(h.edit_synthetic_noise_ARM_order); 
+    h.edit_synthetic_noise_ARM_order_txt = uicontrol(h.panel_synthetic_noise,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[txt_xpos(1) txt_ypos(3) txt_width txt_height],...
+        'FontSize',font_size,'HorizontalAlignment','left','String','ARM Order','Visible','off');
+    h.edit_synthetic_noise_ARM_order = uicontrol(h.panel_synthetic_noise,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[box_xpos(1) box_ypos(3) box_width box_height],'ToolTip',sprintf('Auto-Regressive Model (ARM) order\n\nOrder<10 speeds up computations but at a cost of modeling'),...
+        'FontSize',font_size,'HorizontalAlignment','center','String','10','Value',1,'Callback',@update_study_cfg,'Visible','off');
+
     %% Sub-Subpanel Brain Noise Parameters
     % delete(h.panel_brain_noise)
     h.panel_brain_noise = uipanel(h.panel_sens_noise,'Title','Brain Noise Sources','FontSize',10,'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',[0 0 0],...
-        'Units','normalized','Position',[.005 .01 .99 .77],'Visible','off');
+        'Units','normalized','Position',[.505 .01 .49 .77],'Visible','off');
     %% Edit Number of Noise sources
     h.edit_num_noise_sources_txt = uicontrol(h.panel_brain_noise,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
-        'Position',[.01 .65 .18 .35],...
+        'Position',[.01 .65 .28 .25],...
         'FontSize',10,'HorizontalAlignment','left','String','Number per Trial');
     h.edit_num_noise_sources = uicontrol(h.panel_brain_noise,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
-        'Position',[sum(h.edit_num_noise_sources_txt.Position([1 3]))+.01 h.edit_num_noise_sources_txt.Position(2) .07 .35],...
+        'Position',[sum(h.edit_num_noise_sources_txt.Position([1 3]))+.02 h.edit_num_noise_sources_txt.Position(2) .1 .25],...
         'FontSize',8,'HorizontalAlignment','center','String','30','Value',1);
     %% Edit Noise Source Amplitudes Mean +/- Stdev
     h.edit_brain_noise_amp_txt = uicontrol(h.panel_brain_noise,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
-        'Position',[sum(h.edit_num_noise_sources.Position([1 3]))+.01 h.edit_num_noise_sources_txt.Position(2) .275 .35],...
+        'Position',[sum(h.edit_num_noise_sources.Position([1 3]))+.02 h.edit_num_noise_sources_txt.Position(2) .405 .25],...
         'FontSize',10,'HorizontalAlignment','left','String','Noise Amp [mean stdev]');
     h.edit_brain_noise_amp = uicontrol(h.panel_brain_noise,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
-        'Position',[sum(h.edit_brain_noise_amp_txt.Position([1 3]))+.01 h.edit_num_noise_sources_txt.Position(2) .07 .35],...
+        'Position',[sum(h.edit_brain_noise_amp_txt.Position([1 3]))+.02 h.edit_num_noise_sources_txt.Position(2) .1 .25],...
         'FontSize',8,'HorizontalAlignment','center','String','30 20','Value',1);
     %% Noise Source Locations
     h.btn_brain_locs_txt = uicontrol(h.panel_brain_noise,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
-        'Position',[.01 h.menu_noise_projection_txt.Position(2)-.55 .25 .35],...
+        'Position',[.01 .01 .25 .5],...
         'FontSize',10,'HorizontalAlignment','left','String','Brain Noise Locations:');
     h.btn_rand_brain_noise_locs = uicontrol(h.panel_brain_noise,'BackgroundColor',[1 .9 .9],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
-        'Position',[sum(h.btn_brain_locs_txt.Position([1 3]))+.01 h.btn_brain_locs_txt.Position(2) .15 .35],...
+        'Position',[sum(h.btn_brain_locs_txt.Position([1 3]))+.01 h.btn_brain_locs_txt.Position(2)+.3 .35 .25],...
         'FontSize',8,'HorizontalAlignment','center','String','Random Locs','Value',1,'Callback',@btn_rand_brain_noise_locs_Callback);
     h.btn_load_brain_noise_locs = uicontrol(h.panel_brain_noise,'BackgroundColor',[1 1 1]*.9,'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
-        'Position',[sum(h.btn_rand_brain_noise_locs.Position([1 3]))+.01 h.btn_brain_locs_txt.Position(2) .125 .35],...
+        'Position',[sum(h.btn_rand_brain_noise_locs.Position([1 3]))+.01 h.btn_brain_locs_txt.Position(2)+.3 .35 .25],...
         'FontSize',8,'HorizontalAlignment','center','String','Load Locs','Value',1,'Callback',@btn_load_brain_noise_locs_Callback);
     h.btn_load_default_mode_noise_locs = uicontrol(h.panel_brain_noise,'BackgroundColor',[.9 1 .9],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
-        'Position',[sum(h.btn_load_brain_noise_locs.Position([1 3]))+.01 h.btn_brain_locs_txt.Position(2) .175 .35],...
+        'Position',[h.btn_rand_brain_noise_locs.Position(1) h.btn_brain_locs_txt.Position(2) .35 .25],...
         'FontSize',8,'HorizontalAlignment','center','String','Default Mode Locs','Value',1,'Callback',@btn_load_default_mode_noise_locs_Callback);
     h.btn_plot_noise_locs = uicontrol(h.panel_brain_noise,'BackgroundColor',[.9 .9 1],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
-        'Position',[sum(h.btn_load_default_mode_noise_locs.Position([1 3]))+.01 h.btn_brain_locs_txt.Position(2) .175 .35],...
+        'Position',[sum(h.btn_load_default_mode_noise_locs.Position([1 3]))+.01 h.btn_brain_locs_txt.Position(2) .35 .25],...
         'FontSize',8,'HorizontalAlignment','center','String','Plot Noise Locs','Value',1,'Callback',@btn_plot_noise_locs);
     
     %% Subpanel "Functions" buttons
     % delete(h.panel_project_btns)
     h.panel_project_btns = uipanel(h.panel_sim_data,'Title','Functions','FontSize',10,'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',[0 0 0],...
         'Units','normalize','Position',[.01 .71 .98 .115],'Visible','on');
-    %% Edit Leadfield gain factor
-    h.edit_leadfield_gain_txt = uicontrol(h.panel_project_btns,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
-        'Position',[.01 .6 .175 .325],...
-        'FontSize',10,'HorizontalAlignment','left','String','Lead Field Gain');
-    h.edit_leadfield_gain = uicontrol(h.panel_project_btns,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
-        'Position',[sum(h.edit_leadfield_gain_txt.Position([1 3]))+.01 h.edit_leadfield_gain_txt.Position(2) .07 .35],...
-        'FontSize',8,'HorizontalAlignment','center','String','1e6','Value',1);
-    %% Btn Simulate M/EEG by forward projecting the data
-    h.btn_run_sim_meeg = uicontrol(h.panel_project_btns,'BackgroundColor',[.9 1 .9],'ForegroundColor',[0 0 0],'Style','pushbutton','Units','normalize',...
-        'Position',[.05 .2 .255 .35],'Visible','on','UserData',1,...
-        'FontSize',10,'HorizontalAlignment','center','String','Simulate M/EEG','Callback',@sim_meeg);
     %% Radio to open "Preprocessing" Panel
     h.radio_panel_preprocess = uicontrol(h.panel_project_btns,'Style','radiobutton', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',[0 .5 .5],'Units','normalize',...
-        'Position',[sum(h.btn_run_sim_meeg.Position([1 3]))+.02  h.edit_leadfield_gain_txt.Position(2) .25 .35],...
-        'FontSize',10,'HorizontalAlignment','left','String','Preprocessing Panel','Value',0,'Callback',@radio_panel_preprocess_CallBack);
+        'Position',[.01  .6 .185 .35], 'FontSize',10,'HorizontalAlignment','left','String','Preprocessing Panel','Value',0,'Callback',@radio_panel_preprocess_CallBack);
+    %% Edit Leadfield gain factor
+    h.edit_leadfield_gain_txt = uicontrol(h.panel_project_btns,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[sum(h.radio_panel_preprocess.Position([1 3]))+.01 .6 .15 .325],...
+        'FontSize',10,'HorizontalAlignment','left','String','Lead Field Gain');
+    h.edit_leadfield_gain = uicontrol(h.panel_project_btns,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
+        'Position',[sum(h.edit_leadfield_gain_txt.Position([1 3]))+.01 h.edit_leadfield_gain_txt.Position(2) .05 .35],...
+        'FontSize',8,'HorizontalAlignment','center','String','1e-3','Value',1);
+    %% Radio "avgref" leadfield before forward projection
+    h.radio_avgref_leadfields = uicontrol(h.panel_project_btns,'Style','radiobutton', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',[0 .5 .5],'Units','normalize',...
+        'Position',[sum(h.edit_leadfield_gain.Position([1 3]))+.02  h.edit_leadfield_gain_txt.Position(2) .175 .35],...
+        'FontSize',10,'HorizontalAlignment','left','String','AvgRef Leadfields','Value',1);
+    %% Btn Simulate M/EEG by forward projecting the data
+    h.btn_run_sim_meeg = uicontrol(h.panel_project_btns,'BackgroundColor',[.9 1 .9],'ForegroundColor',[0 0 0],'Style','pushbutton','Units','normalize',...
+        'Position',[.01 .2 .255 .35],'Visible','on','UserData',1,...
+        'FontSize',10,'HorizontalAlignment','center','String','Simulate M/EEG','Callback',@sim_meeg);
     %% Btn Filter data
     h.btn_filter_data = uicontrol(h.panel_project_btns,'BackgroundColor',[1 1 1]*.9,'ForegroundColor',[0 .5 .5],'Style','pushbutton','Units','normalize',...
         'Position',[sum(h.btn_run_sim_meeg.Position([1 3]))+.02  h.btn_run_sim_meeg.Position(2) .11 .35],'Visible','on','UserData',1,...
@@ -1108,7 +1511,8 @@ if h.license_flag==1
     %% Btn Load Real M/EEG
     h.btn_load_real_meeg = uicontrol(h.panel_project_btns,'BackgroundColor',[.9 1 .9],'ForegroundColor',[0 0 0],'Style','pushbutton','Units','normalize',...
         'Position',[.805 .65 .185 .35],'Visible','on','UserData',1,...
-        'FontSize',8,'HorizontalAlignment','center','String','Load Real M/EEG','Callback',{@sm_load_real_sensor_file,'final'});
+        'FontSize',8,'HorizontalAlignment','center','String','Load Real M/EEG','Callback',{@sm_load_real_sensor_file,'final'},...
+        'Tooltip',sprintf('Data.mat file variables:\n   data = [sensor x samples x trials]\n   srate = sample rate\n   lat = latency values of samples'));
     %% Btn Load Source waves from user-defined file
     h.btn_load_sig_waves = uicontrol(h.panel_project_btns,'BackgroundColor',[.8 .8 1],'ForegroundColor',[0 0 0],'Style','pushbutton','Units','normalize',...
         'Position',[.605 .65 .185 .35],'Visible','on','UserData',1,...
@@ -1143,8 +1547,8 @@ if h.license_flag==1
         'Position',[.01 .95 .11 .035],...
         'FontSize',10,'HorizontalAlignment','left','String','Sources','FontWeight','bold');
     h.listbox_sources = uicontrol(h.panel_sens_data,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[.6 .4 .9],'Style','listbox','Units','normalize',...
-        'Position',[.01 h.listbox_sources_txt.Position(2)-.11 .12 .11],...
-        'FontSize',8,'HorizontalAlignment','center','String',{'Source 1' 'Source 2' 'Source 3'},'Value',1,'Callback',@plot_source_data);
+        'Position',[.01 h.listbox_sources_txt.Position(2)-.21 .12 .21],...
+        'FontSize',8,'HorizontalAlignment','center','String',{'Source 1' 'Source 2' 'Source 3'},'Max',200,'Value',1,'Callback',@plot_source_data);
     % changing color of list box items for sources 1, 2, and 3
     Data(1).name = 'Source 1'; Data(1).Color = h.src_clr(1,:)*255;
     Data(2).name = 'Source 2'; Data(2).Color = h.src_clr(2,:)*255;
@@ -1160,27 +1564,53 @@ if h.license_flag==1
         'Position',[.01 h.listbox_sources.Position(2)-.05 .11 .035],...
         'FontSize',10,'HorizontalAlignment','left','String','Sensors','FontWeight','bold');
     h.listbox_chans = uicontrol(h.panel_sens_data,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.chan_clr*.45,'Style','listbox','Units','normalize',...
-        'Position',[.01 .1 .12 h.listbox_chans_txt.Position(2)-.1],...
+        'Position',[.01 .125 .12 h.listbox_chans_txt.Position(2)-.125],...
         'FontSize',8,'HorizontalAlignment','center','String','','Value',1,'Max',2,'Callback',@plot_sens_data);
     %% Btn Plot Sensor Waves
     h.btn_plot_sens_data = uicontrol(h.panel_sens_data,'BackgroundColor',[1 1 .8],'ForegroundColor',[.8 1 1]*.2,'Style','pushbutton','Units','normalize',...
-        'Position',[h.listbox_chans.Position(1) h.listbox_chans.Position(2)-.06 .15 .05],...
+        'Position',[h.listbox_chans.Position(1) .005 h.listbox_chans.Position(3) .05],...
         'FontSize',8,'HorizontalAlignment','center','String','RePlot Sensors','Value',1,'Callback',@plot_sens_data);
+    %% Re-ref sensors for EEG
+    % delete(h.btn_reref_EEG);
+    h.btn_reref_EEG = uicontrol(h.panel_sens_data,'BackgroundColor',[1 .9 .9],'ForegroundColor',[.5 0 0]*0,'Style','togglebutton','Units','normalize',...
+        'Position',[h.listbox_chans.Position(1) .06 h.listbox_chans.Position(3) .05],'Visible','on',...
+        'FontSize',8,'HorizontalAlignment','center','String','Ref: None','Callback',@sm_reref_eeg);
+    if isfield(h.bst,'subj_sens_eeg_file')
+        if isempty(h.bst.subj_sens_eeg_file) % no EEG sensors
+            h.btn_reref_EEG.Visible = 'off';
+        end
+    end
+
+    
     %% Axes plotting Noise, Signal, Final
     h.axes_sens_noise = axes(h.panel_sens_data,'Position',[.23 .675 .95-.23 .225]);
     h.axes_sens_signal = axes(h.panel_sens_data,'Position',[.23 .375 .95-.23 .225]);
     h.axes_sens_final = axes(h.panel_sens_data,'Position',[.23  .075 .95-.23 .225]); xlabel('Time (sec)'); ylabel('Amp (microV)');
     h.edit_yscale_txt = uicontrol(h.panel_sens_data,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
-        'Position',[.23 .95 .15 .035],...
-        'FontSize',10,'HorizontalAlignment','left','String',['Y Scale (' char(181) 'V):'],'Value',1);
+        'Position',[.135 .965 .1 .035],...
+        'FontSize',9,'HorizontalAlignment','left','String',['Y Scale (' char(181) 'V):'],'Value',1);
     h.edit_yscale = uicontrol(h.panel_sens_data,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
-        'Position',[sum(h.edit_yscale_txt.Position([1 3]))+.01 h.edit_yscale_txt.Position(2) .125 .045],...
-        'FontSize',10,'HorizontalAlignment','center','String','-100 100','Value',1,'Callback',@update_y_scale);
-    %% Btn Topography
-    h.btn_plot_topo = uicontrol(h.panel_sens_data,'BackgroundColor',[1 1 .8],'ForegroundColor',[.8 1 1]*.2,'Style','pushbutton','Units','normalize',...
-        'Position',[.8 h.edit_yscale_txt.Position(2) .15 .05],...
+        'Position',[.15 h.edit_yscale_txt.Position(2)-.05 .065 .045],...
+        'FontSize',9,'HorizontalAlignment','center','String','-100 100','Value',1,'Callback',@update_y_scale);
+    %% Btn Plot Topography
+    h.btn_plot_topo = uicontrol(h.panel_sens_data,'BackgroundColor',[1 1 .8],'ForegroundColor',[.8 1 1]*0,'Style','pushbutton','Units','normalize',...
+        'Position',[.25 .95 .1 .05],...
         'FontSize',8,'HorizontalAlignment','center','String','Plot Topo','Value',1,'Callback',@plot_topo_data);
-    
+    % delete(h.btn_plot_topo_movie)
+    h.btn_plot_topo_movie = uicontrol(h.panel_sens_data,'BackgroundColor',[.9 1 .9],'ForegroundColor',[.8 1 1]*0,'Style','togglebutton','Units','normalize',...
+        'Position',[sum(h.btn_plot_topo.Position([1 3]))+.01 h.btn_plot_topo.Position(2) .125 .05],...
+        'FontSize',8,'HorizontalAlignment','center','String','Play Topo Movie','Value',0,'Callback',@run_topo_data_movie);
+    %% Btn Plot Covariances
+    % delete(h.btn_plot_cov);
+    h.btn_plot_cov = uicontrol(h.panel_sens_data,'BackgroundColor',[1 .8 1],'ForegroundColor',[.8 1 1]*0,'Style','pushbutton','Units','normalize',...
+        'Position',[sum(h.btn_plot_topo_movie.Position([1 3]))+.01 h.btn_plot_topo.Position(2) .125 .05],...
+        'FontSize',8,'HorizontalAlignment','center','String','Plot Covariances','Value',1,'Callback',{@sm_plot_cov_sim});
+    %% Btn Plot FFT
+    % delete(h.btn_plot_fft);
+    h.btn_plot_fft = uicontrol(h.panel_sens_data,'BackgroundColor',[.8 .8 1],'ForegroundColor',[.8 1 1]*0,'Style','pushbutton','Units','normalize',...
+        'Position',[sum(h.btn_plot_cov.Position([1 3]))+.01 h.btn_plot_topo.Position(2) .125 .05],...
+        'FontSize',8,'HorizontalAlignment','center','String','Plot FFT','Value',1,'Callback',{@sm_plot_fft});
+
     %% %%%% Panel "Preprocessing & Analysis" on Tab "Simulate M/EEG" %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % delete(h.panel_preprocess);
     h.panel_preprocess = uipanel(h.tab_sim_meeg,'Title','Preprocessing & Analysis','FontSize',10,'BackgroundColor',[.96 1 1],'Foregroundcolor',[0 0 0],...
@@ -1204,7 +1634,7 @@ if h.license_flag==1
         'FontSize',10,'HorizontalAlignment','left','String','Filter Method');
     h.menu_filt_method = uicontrol(h.panel_filtering,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize',...
         'Position',[sum(h.menu_filt_method_txt.Position([1 3]))+.01 h.menu_filt_method_txt.Position(2) .155 .28],...
-        'FontSize',8,'HorizontalAlignment','center','String',{'equiripple' 'kaiserwin'},'Value',1,'Callback',@menu_filt_type_Callback);
+        'FontSize',8,'HorizontalAlignment','center','String',{'equiripple' 'kaiserwin'},'Value',2,'Callback',@menu_filt_type_Callback);
     %% Edit: Filter Order
     h.edit_filt_order_txt = uicontrol(h.panel_filtering,'Style','text', 'BackgroundColor',h.panel_filtering.BackgroundColor,'Foregroundcolor','k','Units','normalize',...
         'Position',[sum(h.menu_filt_method.Position([1 3]))+.01 h.menu_filt_method.Position(2) .12 h.menu_filt_method_txt.Position(4)],...
@@ -1219,7 +1649,7 @@ if h.license_flag==1
         'FontSize',10,'HorizontalAlignment','left','String','Filter Band');
     h.edit_filt_band = uicontrol(h.panel_filtering,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','edit','Units','normalize',...
         'Position',[sum(h.edit_filt_band_txt.Position([1 3]))+.005 h.edit_filt_band_txt.Position(2) .155 h.edit_filt_band_txt.Position(4)],...
-        'FontSize',10,'HorizontalAlignment','center','String','0 0 0 0',...
+        'FontSize',10,'HorizontalAlignment','center','String','0.5 1 30 35',...
         'Tooltip',sprintf('freqs = frequencies for  [lpStartFreq lpStopFreq hpStartFreq hpStopFreq]\nlowpass filter at 20-Hz with 4-Hz stop-band transiton = [0 0 20 24].\nhighpass filter at 10-Hz with 2-Hz stop-band transiton = [8 10 0 0].\nbandpass filter at 10- to 20-Hz with 2- and 4-Hz stop-band transitons = [8 10 20 24].\nbandstop filter at 10- to 20-Hz with 2- and 4-Hz stop-band transitons = [10 12 18 20].\n') );
     %% Edit: StopbandAttenuation
     h.edit_filt_StopbandAttenuation_txt = uicontrol(h.panel_filtering,'Style','text', 'BackgroundColor',h.panel_filtering.BackgroundColor,'Foregroundcolor','k','Units','normalize',...
@@ -1327,13 +1757,13 @@ if h.license_flag==1
     %%  %%%% "Loading and Saving" SimMEEG datasets
     %% Load SimMEEG dataset
     %      delete(h.btn_load_SimMEEG_dataset)
-    h.btn_load_SimMEEG_dataset = uicontrol(h.tab_sim_meeg,'BackgroundColor',[.9 1 .9],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
-        'Position',[.78 .96 .1 .035],'Visible','on',...
+    h.btn_load_SimMEEG_dataset = uicontrol(h.main_fig,'BackgroundColor',[.9 1 .9],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
+        'Position',[.78 .84 .1 .025],'Visible','on',...
         'FontSize',9,'HorizontalAlignment','center','String','Load SimMEEG Dataset','Callback',@sm_load_SimMEEG_dataset);
     %% Save SimMEEG dataset
     %      delete(h.btn_save_SimMEEG_dataset)
-    h.btn_save_SimMEEG_dataset = uicontrol(h.tab_sim_meeg,'BackgroundColor',[1 .8 .8],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
-        'Position',[.89 .96 .1 .035],'Visible','on',...
+    h.btn_save_SimMEEG_dataset = uicontrol(h.main_fig,'BackgroundColor',[1 .8 .8],'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
+        'Position',[.89 .84 .1 .025],'Visible','on',...
         'FontSize',9,'HorizontalAlignment','center','String','Save SimMEEG Dataset','Callback',@sm_save_SimMEEG_dataset);
     
     
@@ -1375,13 +1805,9 @@ if h.license_flag==1
         'FontSize',10,'HorizontalAlignment','center','String','Run Monte Carlo','Value',1,'Callback',@run_monte_carlo);
     %% Radio to run Source Modeling
     h.radio_monte_source_modeling = uicontrol(h.panel_monte_carlo,'Style','radiobutton', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
-        'Position',[h.btn_update_monte_carlo.Position(1)-.165 h.btn_update_monte_carlo.Position(2) .15 .48],...
+        'Position',[h.btn_run_monte_carlo.Position(1)-.135 h.edit_monte_num_sims.Position(2) .125 .48],...
         'FontSize',10,'HorizontalAlignment','left','String','Perform Inverse Modeing','Value',1,'Callback',@radio_monte_source_modeling_CallBack);
-    %% Radio convert BS to FieldTrip format and save with Monte Carlo run
-    h.radio_monte_save_FT_data = uicontrol(h.panel_monte_carlo,'Style','radiobutton', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
-        'Position',[h.btn_run_monte_carlo.Position(1)-.165 h.btn_run_monte_carlo.Position(2) .15 .48],...
-        'FontSize',10,'HorizontalAlignment','left','String','Save with Field Trip format','Value',1);
-    
+      
     %% %%%% Panel "Study Parameters"  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % delete(h.panel_monte_study_params);
     h.panel_monte_study_params = uipanel(h.tab_monte_carlo,'Title','Study & Source PLV/PLI Parameters','FontSize',10,'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',[.6 0 1],...
@@ -1422,12 +1848,17 @@ if h.license_flag==1
     h.edit_monte_plv_StdDev = uicontrol(h.panel_monte_study_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor','k','Style','edit','Units','normalize',...
         'Position',[h.edit_monte_num_trials_StdDev.Position(1) h.edit_monte_plv_range.Position(2) h.edit_monte_num_trials_StdDev.Position(3:4)],...
         'FontSize',10,'HorizontalAlignment','center','String','0.05','Tooltip',sprintf('Standard Deviation for the Means in the Range Values to the left.\n Set to 0 for fixed Means.'));
-    
+
     %% %%%% Panel "Simulate M/EEG Parameters"  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % delete(h.panel_monte_random_params);
     h.panel_monte_random_params = uipanel(h.tab_monte_carlo,'Title','Simulate M/EEG Parameters','FontSize',10,'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',[0 .6 .6],...
         'Units','normalize','Position',[.005 h.panel_monte_study_params.Position(2)-.25 .99 .25],'Visible','on');
-    %% Source 1 Amp Range
+   %% Radio to randomize source locations
+   % delete(h.radio_monte_rand_source_locs);
+    h.radio_monte_rand_source_locs = uicontrol(h.panel_monte_random_params,'Style','radiobutton', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[.005 .86 .21 .125],'Callback',@sm_monte_hide_edit_locs_ori,...
+        'FontSize',10,'HorizontalAlignment','left','String','Randomize Locations & Orientations','Value',0);
+     %% Source 1 Amp Range
     txt_xsize = .21; txt_ysize = .125;
     ui_xsize = .06; ui_ysize = .125;
     %% Text Titles
@@ -1459,15 +1890,15 @@ if h.license_flag==1
     %% Source Amp Range
     h.edit_monte_source_amp_range(1) = uicontrol(h.panel_monte_random_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.src_clr(1,:),'Style','edit','Units','normalize',...
         'Position',[h.edit_monte_source1_txt.Position(1) h.edit_monte_amp_range_txt.Position(2) ui_xsize ui_ysize],...
-        'FontSize',10,'HorizontalAlignment','center','String','30',...
+        'FontSize',10,'HorizontalAlignment','center','String','60',...
         'Tooltip',sprintf('Mean +/- StDev (set in last column) for Source Amplitude Distribution to be sampled from for each Simulation Run\n Setting a range 10:20:50 will generate 100 Simulation Runs for the 3 Amplitude values sampled from a distribution with a mean at these values +/- StdDev.'));
     h.edit_monte_source_amp_range(2) = uicontrol(h.panel_monte_random_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.src_clr(2,:),'Style','edit','Units','normalize',...
         'Position',[h.edit_monte_source2_txt.Position(1) h.edit_monte_amp_range_txt.Position(2) ui_xsize ui_ysize],...
-        'FontSize',10,'HorizontalAlignment','center','String','30',...
+        'FontSize',10,'HorizontalAlignment','center','String','60',...
         'Tooltip',sprintf('Mean +/- StDev (set in last column) for Source Amplitude Distribution to be sampled from for each Simulation Run\n Setting a range 10:20:50 will generate 100 Simulation Runs for the 3 Amplitude values sampled from a distribution with a mean at these values +/- StdDev.'));
     h.edit_monte_source_amp_range(3) = uicontrol(h.panel_monte_random_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.src_clr(3,:),'Style','edit','Units','normalize',...
         'Position',[h.edit_monte_source3_txt.Position(1) h.edit_monte_amp_range_txt.Position(2) ui_xsize ui_ysize],...
-        'FontSize',10,'HorizontalAlignment','center','String','30',...
+        'FontSize',10,'HorizontalAlignment','center','String','60',...
         'Tooltip',sprintf('Mean +/- StDev (set in last column) for Source Amplitude Distribution to be sampled from for each Simulation Run\n Setting a range 10:20:50 will generate 100 Simulation Runs for the 3 Amplitude values sampled from a distribution with a mean at these values +/- StdDev.'));
     h.edit_monte_source_amp_StdDev = uicontrol(h.panel_monte_random_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor','k','Style','edit','Units','normalize',...
         'Position',[h.edit_monte_range_StdDev_txt.Position(1) h.edit_monte_amp_range_txt.Position(2) ui_xsize ui_ysize],...
@@ -1540,29 +1971,46 @@ if h.license_flag==1
         'Position',[h.edit_monte_range_StdDev_txt.Position(1) h.edit_monte_ori_El_range_txt.Position(2) ui_xsize ui_ysize],...
         'FontSize',10,'HorizontalAlignment','center','String','0','Tooltip',sprintf('Standard Deviation for the Means in the Range Values to the left.\n Set to 0 for fixed Means.'));
     %% Listbox to select MEG/EEG to calculate during Mont Carlo
+    % delete(h.listbox_monte_sens_type_txt); delete(h.listbox_monte_sens_type); 
     h.listbox_monte_sens_type_txt = uicontrol(h.panel_monte_random_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',h.chan_clr*.45,'Units','normalize',...
-        'Position',[sum(h.edit_monte_source_amp_StdDev.Position([1 3]))+.02 1-.1 .05 .08],...
+        'Position',[sum(h.edit_monte_source_amp_StdDev.Position([1 3]))+.02 1-.1 .035 .08],...
         'FontSize',10,'HorizontalAlignment','left','String',sprintf('Sensors'),'FontWeight','bold');
     h.listbox_monte_sens_type = uicontrol(h.panel_monte_random_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.chan_clr*.45,'Style','listbox','Units','normalize',...
         'Position',[h.listbox_monte_sens_type_txt.Position(1) h.listbox_monte_sens_type_txt.Position(2)-.23 h.listbox_monte_sens_type_txt.Position(3) .225],...
         'FontSize',8,'HorizontalAlignment','center','String',{'MEG' 'EEG'},'Value',1,'Max',3);
+    %% Listbox to MEG num sensors
+    % delete(h.listbox_monte_MEG_sens_montage_txt); delete(h.listbox_monte_MEG_sens_montage); 
+    h.listbox_monte_MEG_sens_montage_txt = uicontrol(h.panel_monte_random_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',h.chan_clr*.45,'Units','normalize',...
+        'Position',[sum(h.listbox_monte_sens_type.Position([1 3]))+.005 1-.1 .05 .08],...
+        'FontSize',10,'HorizontalAlignment','left','String',sprintf('#MEG'),'FontWeight','bold');
+    h.listbox_monte_MEG_sens_montage = uicontrol(h.panel_monte_random_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.chan_clr*.45,'Style','listbox','Units','normalize',...
+        'Position',[h.listbox_monte_MEG_sens_montage_txt.Position(1) h.listbox_monte_MEG_sens_montage_txt.Position(2)-.23 h.listbox_monte_sens_type.Position(3) .225],...
+        'FontSize',8,'HorizontalAlignment','center','String','','Value',1,'Max',10);
+    %% Listbox to EEG num sensors
+    % delete(h.listbox_monte_EEG_sens_montage_txt); delete(h.listbox_monte_EEG_sens_montage); 
+    h.listbox_monte_EEG_sens_montage_txt = uicontrol(h.panel_monte_random_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',h.chan_clr*.45,'Units','normalize',...
+        'Position',[sum(h.listbox_monte_MEG_sens_montage.Position([1 3]))+.005 1-.1 .05 .08],...
+        'FontSize',10,'HorizontalAlignment','left','String',sprintf('#EEG'),'FontWeight','bold');
+    h.listbox_monte_EEG_sens_montage = uicontrol(h.panel_monte_random_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.chan_clr*.45,'Style','listbox','Units','normalize',...
+        'Position',[h.listbox_monte_EEG_sens_montage_txt.Position(1) h.listbox_monte_EEG_sens_montage_txt.Position(2)-.23 h.listbox_monte_sens_type.Position(3) .225],...
+        'FontSize',8,'HorizontalAlignment','center','String','','Value',1,'Max',10);
     %% Radio Filtering after simulation of all data
     h.radio_monte_filter_flag = uicontrol(h.panel_monte_random_params,'Style','radiobutton', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
         'Position',[h.listbox_monte_sens_type.Position(1) h.listbox_monte_sens_type.Position(2)-.13 .16 .08],...
         'FontSize',10,'HorizontalAlignment','left','String','Filter Sensor & Source Data','Value',0);
     %% Menu: Noise Projection Type 'Synthetic', 'Brain' or 'Real'
     h.menu_monte_synthetic_real_data_txt = uicontrol(h.panel_monte_random_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
-        'Position',[sum(h.listbox_monte_sens_type_txt.Position([1 3]))+.01 h.listbox_monte_sens_type_txt.Position(2) .125 .08],...
+        'Position',[h.radio_monte_filter_flag.Position(1) h.radio_monte_filter_flag.Position(2)-.13 .125 .1],...
         'FontSize',10,'HorizontalAlignment','left','String','Sensor Noise Type','FontWeight','bold',...
         'Tooltip',sprintf('Sets Sensor Noise Type\n"Synthetic" parameters based on those set in "Simulate M/EEG" Panel\n"Real Sensor Noise" requires *.mat files to have saved variables: "data [channels x samples x trials]", "srate", "lat"'));
     h.menu_monte_synthetic_real_data = uicontrol(h.panel_monte_random_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize',...
         'Position',[h.menu_monte_synthetic_real_data_txt.Position(1) h.menu_monte_synthetic_real_data_txt.Position(2)-.09 h.menu_monte_synthetic_real_data_txt.Position(3) .08],...
-        'FontSize',8,'HorizontalAlignment','left','String',{'Synthetic Sensor Noise' 'Synthetic Brain Noise' 'Synthetic MVAR/GAN Noise (not implemented yet)' 'Real Sensor Noise'},...
+        'FontSize',8,'HorizontalAlignment','left','String',h.menu_noise_projection.String,...
         'Value',1,'Max',3,'Callback',@menu_monte_synthetic_real_data_Callback,...
         'Tooltip',sprintf('Sets Sensor Noise Type\n"Synthetic" parameters based on those set in "Simulate M/EEG" Panel\n"Real Sensor Noise" requires *.mat files to have saved variables: "data [channels x samples x trials]", "srate", "lat"'));
     %% Menu: "synthetic" or "Real" Source waveforms and Sensor noise
     h.menu_monte_synthetic_real_source_txt = uicontrol(h.panel_monte_random_params,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
-        'Position',[sum(h.menu_monte_synthetic_real_data_txt.Position([1 3]))+.02 h.listbox_monte_sens_type_txt.Position(2) .125 .08],...
+        'Position',[h.menu_monte_synthetic_real_data_txt.Position(1) h.menu_monte_synthetic_real_data.Position(2)-.15 .125 .1],...
         'FontSize',10,'HorizontalAlignment','left','String','Source Type','FontWeight','bold',...
         'Tooltip',sprintf('Sets Source waveforms:\n"Synthetic" simulates source from parameters based on those set in "Simulate M/EEG" Panel\n"Real Sources" requires *.mat files to have variables: "source_data [sources x samples x trials]", "srate", "lat"'));
     h.menu_monte_synthetic_real_source = uicontrol(h.panel_monte_random_params,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','popupmenu','Units','normalize',...
@@ -1570,31 +2018,41 @@ if h.license_flag==1
         'FontSize',8,'HorizontalAlignment','left','String',{'Synthetic Sources' 'Real Sources'},'Value',1,'Max',3,'Callback',@menu_monte_synthetic_real_data_Callback,...
         'Tooltip',sprintf('Sets Source waveforms:\n"Synthetic" simulates source from parameters based on those set in "Simulate M/EEG" Panel\n"Real Sources" requires *.mat files to have variables: "source_data [sources x samples x trials]", "srate", "lat"'));
     %% Btn Set Real Data Dir
-    h.btn_set_real_datadir = uicontrol(h.panel_monte_random_params,'BackgroundColor',[.9 .9 .9],'ForegroundColor','k','Style','pushbutton','Units','normalize',...
-        'Position',[h.menu_monte_synthetic_real_data.Position(1) h.menu_monte_synthetic_real_data.Position(2)-.15 .080 .1],...
-        'FontSize',10,'HorizontalAlignment','center','String','Set Real Dir','Value',1,'Visible','off','Callback',@btn_set_real_datadir);
+    h.btn_set_real_noise_datadir = uicontrol(h.panel_monte_random_params,'BackgroundColor',[.9 .9 .9],'ForegroundColor','k','Style','pushbutton','Units','normalize',...
+        'Position',[sum(h.menu_monte_synthetic_real_source.Position([1 3]))+.01 h.menu_monte_synthetic_real_data.Position(2)-.03 .080 .12],...
+        'FontSize',10,'HorizontalAlignment','center','String','Set Real Noise Dir','Value',1,'Visible','off','Callback',{@btn_set_real_datadir,'Noise'});
     %% Text Real Data Dir
-    h.real_datadir_txt = uicontrol(h.panel_monte_random_params,'Style','text','BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
-        'Position',[sum(h.btn_set_real_datadir.Position([1 3]))+.01 h.btn_set_real_datadir.Position(2) .35 .09],...
-        'FontSize',10,'HorizontalAlignment','left','String','Real Data Dir: ____________________________','Visible','off');
+    h.real_noise_datadir_txt = uicontrol(h.panel_monte_random_params,'Style','text','BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[sum(h.btn_set_real_noise_datadir.Position([1 3]))+.01 h.btn_set_real_noise_datadir.Position(2) .35 .09],...
+        'FontSize',10,'HorizontalAlignment','left','String','Real Noise Dir: ____________________________','Visible','off');
+
+    %% Btn Set Real Data Dir
+    h.btn_set_real_source_datadir = uicontrol(h.panel_monte_random_params,'BackgroundColor',[.9 .9 .9],'ForegroundColor','k','Style','pushbutton','Units','normalize',...
+        'Position',[sum(h.menu_monte_synthetic_real_source.Position([1 3]))+.01  h.menu_monte_synthetic_real_source.Position(2)-.03 .080 .12],...
+        'FontSize',10,'HorizontalAlignment','center','String','Set Real Source Dir','Value',1,'Visible','off','Callback',{@btn_set_real_datadir,'Source'});
+    %% Text Real Data Dir
+    h.real_source_datadir_txt = uicontrol(h.panel_monte_random_params,'Style','text','BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
+        'Position',[sum(h.btn_set_real_source_datadir.Position([1 3]))+.01 h.btn_set_real_source_datadir.Position(2) .35 .09],...
+        'FontSize',10,'HorizontalAlignment','left','String','Real Source Dir: ____________________________','Visible','off');
+    
     
     %% %%%% Panel "Source Modeling Parameters"  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % delete(h.panel_monte_inverse_model);
     h.panel_monte_inverse_model = uipanel(h.tab_monte_carlo,'Title','Source Modeling Parameters','FontSize',10,'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',[1 .3 .5],...
-        'Units','normalize','Position',[.005 h.panel_monte_random_params.Position(2)-.3 .99 .3],'Visible','on');
+        'Units','normalize','Position',[.005 h.panel_monte_random_params.Position(2)-.51 .49 .51],'Visible','on');
     %% Listbox to select Inv Soln to calculate during Mont Carlo
     h.listbox_monte_inv_soln_txt = uicontrol(h.panel_monte_inverse_model,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',h.chan_clr*.45,'Units','normalize',...
-        'Position',[.01 1-.085 .105 .075],...
+        'Position',[.01 1-.045 .15 .04],...
         'FontSize',10,'HorizontalAlignment','center','String',sprintf('Inverse Models'),'FontWeight','bold');
     h.listbox_monte_inv_soln = uicontrol(h.panel_monte_inverse_model,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',h.chan_clr*.45,'Style','listbox','Units','normalize',...
-        'Position',[h.listbox_monte_inv_soln_txt.Position(1) h.listbox_monte_inv_soln_txt.Position(2)-.75 h.listbox_monte_inv_soln_txt.Position(3) .725],...
-        'FontSize',8,'HorizontalAlignment','center','String',{'SPA' 'SIA' 'MIA' 'LCMV' 'eLORETA' 'sLORETA' 'MNE' 'dics' 'pcc' 'sMCMV' 'bRAPBeam' 'TrapMUSIC'},'Value',1,'Max',11);
+        'Position',[h.listbox_monte_inv_soln_txt.Position(1) h.listbox_monte_inv_soln_txt.Position(2)-.66 h.listbox_monte_inv_soln_txt.Position(3) .65],...
+        'FontSize',8,'HorizontalAlignment','center','String',h.menu_inv_soln.String,'Value',1,'Max',200);
     %% Listbox: Analyses Type for Source Modeling
     h.listbox_monte_inv_analyses_txt = uicontrol(h.panel_monte_inverse_model,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
-        'Position',[sum(h.listbox_monte_inv_soln.Position([1 3]))+.005 h.listbox_monte_inv_soln_txt.Position(2:4)],...
+        'Position',[sum(h.listbox_monte_inv_soln.Position([1 3]))+.005 h.listbox_monte_inv_soln_txt.Position(2) .2 h.listbox_monte_inv_soln_txt.Position(4)],...
         'FontSize',10,'HorizontalAlignment','center','String',sprintf('Analysis Methods'),'FontWeight','bold');
     h.listbox_monte_inv_analyses = uicontrol(h.panel_monte_inverse_model,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',[1 1 1]*0,'Style','listbox','Units','normalize',...
-        'Position',[h.listbox_monte_inv_analyses_txt.Position(1) h.listbox_monte_inv_analyses_txt.Position(2)-.385 h.listbox_monte_inv_analyses_txt.Position(3) .365],'Enable','on',...
+        'Position',[h.listbox_monte_inv_analyses_txt.Position(1) h.listbox_monte_inv_analyses_txt.Position(2)-.37 h.listbox_monte_inv_analyses_txt.Position(3) .365],'Enable','on',...
         'FontSize',8,'HorizontalAlignment','center','String',{'none','Seeded Functional Connectivity' 'more to come'},'Max',2,'Value',1,'Callback',@sm_menu_inv_analyses_CallBack);
     
     %     %% Radio to run Functional Connectivity (FC) analyses after source modeling
@@ -1602,19 +2060,100 @@ if h.license_flag==1
     %         'Position',[h.listbox_monte_inv_soln.Position(1) h.listbox_monte_inv_soln.Position(2)-.085 .175 .075],...
     %         'FontSize',10,'HorizontalAlignment','left','String','Perform Connectivity Analyses','Value',1);
     
-    
+    %% %%%% Panel "Results to Save"  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % delete(h.panel_monte_saved_results);
+    h.panel_monte_saved_results = uipanel(h.tab_monte_carlo,'Title','Data & Results to Save (Select FieldNames you want saved)','FontSize',10,'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',[0 .6 0],...
+        'Units','normalize','Position',[sum(h.panel_monte_inverse_model.Position([1 3]))+.005 h.panel_monte_random_params.Position(2)-.51 .49 .51],'Visible','on');
+    txt_clr = [0 .6 0];
+    list_clr = [0 0 0];
+    %% Listbox to select Results to save --> each list box will populate with the fieldnames for eahc data type to be saved
+    %% Simulated Data
+    % delete(h.listbox_monte_saved_sim_data_txt); delete(h.listbox_monte_saved_sim_data);
+    h.listbox_monte_saved_sim_data_txt = uicontrol(h.panel_monte_saved_results,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',txt_clr,'Units','normalize',...
+        'Position',[.005 .915 .175 .075],...
+        'FontSize',8,'HorizontalAlignment','center','String',sprintf('Simulated Data\n(sim_data)'),'FontWeight','bold');
+    h.listbox_monte_saved_sim_data = uicontrol(h.panel_monte_saved_results,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',list_clr,'Style','listbox','Units','normalize',...
+        'Position',[h.listbox_monte_saved_sim_data_txt.Position(1) h.listbox_monte_saved_sim_data_txt.Position(2)-.905 h.listbox_monte_saved_sim_data_txt.Position(3) .9],...
+        'FontSize',8,'HorizontalAlignment','center','String','','Callback',{@sm_update_saved_monte_results,'sim_data'},...
+        'Value',1,'Max',200);
+    %% True Source Data
+    % delete(h.listbox_monte_saved_true_source_txt); delete(h.listbox_monte_saved_true_source);
+    h.listbox_monte_saved_true_source_txt = uicontrol(h.panel_monte_saved_results,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',txt_clr,'Units','normalize',...
+        'Position',[sum(h.listbox_monte_saved_sim_data.Position([1 3]))+.005 .915 .175 .075],...
+        'FontSize',8,'HorizontalAlignment','center','String',sprintf('True Source Data\n(sim_data.cfg.source)'),'FontWeight','bold');
+    h.listbox_monte_saved_true_source = uicontrol(h.panel_monte_saved_results,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',list_clr,'Style','listbox','Units','normalize',...
+        'Position',[h.listbox_monte_saved_true_source_txt.Position(1) h.listbox_monte_saved_true_source_txt.Position(2)-.505 h.listbox_monte_saved_true_source_txt.Position(3) .5],...
+        'FontSize',8,'HorizontalAlignment','center','String','','Callback',{@sm_update_saved_monte_results,'true_source'},...
+        'Value',1,'Max',200);
+    %% Inverse Solutions "true_source.TFR_results" if selected
+    % delete(h.listbox_monte_saved_true_source_TFR_results_txt); delete(h.listbox_monte_saved_true_source_TFR_results);
+    h.listbox_monte_saved_true_source_TFR_results_txt = uicontrol(h.panel_monte_saved_results,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',txt_clr,'Units','normalize',...
+        'Position',[h.listbox_monte_saved_true_source.Position(1) h.listbox_monte_saved_true_source.Position(2)-.08 .175 .075],...
+        'FontSize',8,'HorizontalAlignment','center','String',sprintf('TFR Results\n(source.TFR_results)'),'FontWeight','bold');
+    h.listbox_monte_saved_true_source_TFR_results = uicontrol(h.panel_monte_saved_results,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',list_clr,'Style','listbox','Units','normalize',...
+        'Position',[h.listbox_monte_saved_true_source_TFR_results_txt.Position(1) h.listbox_monte_saved_true_source_TFR_results_txt.Position(2)-h.listbox_monte_saved_true_source_TFR_results_txt.Position(2)+.005 h.listbox_monte_saved_true_source_TFR_results_txt.Position(3) h.listbox_monte_saved_true_source_TFR_results_txt.Position(2)-.01],...
+        'FontSize',8,'HorizontalAlignment','center','String','','Callback',{@sm_update_saved_monte_results,'true_source_TFR_results'},...
+        'Value',1,'Max',200);
+    %% Inverse Solutions
+    % delete(h.listbox_monte_saved_inv_soln_txt); delete(h.listbox_monte_saved_inv_soln);
+    h.listbox_monte_saved_inv_soln_txt = uicontrol(h.panel_monte_saved_results,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',txt_clr,'Units','normalize',...
+        'Position',[sum(h.listbox_monte_saved_true_source.Position([1 3]))+.005 .915 .175 .075],...
+        'FontSize',8,'HorizontalAlignment','center','String',sprintf('Inverse Solutions\n(inv_soln)'),'FontWeight','bold');
+    h.listbox_monte_saved_inv_soln = uicontrol(h.panel_monte_saved_results,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',list_clr,'Style','listbox','Units','normalize',...
+        'Position',[h.listbox_monte_saved_inv_soln_txt.Position(1) h.listbox_monte_saved_inv_soln_txt.Position(2)-.505 h.listbox_monte_saved_inv_soln_txt.Position(3) .5],...
+        'FontSize',8,'HorizontalAlignment','center','String','','Callback',{@sm_update_saved_monte_results,'inv_soln'},...
+        'Value',1,'Max',200);
+    %% Inverse Solutions "inv_soln.TFR_results" if selected
+    % delete(h.listbox_monte_saved_inv_soln_TFR_results_txt); delete(h.listbox_monte_saved_inv_soln_TFR_results);
+    h.listbox_monte_saved_inv_soln_TFR_results_txt = uicontrol(h.panel_monte_saved_results,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',txt_clr,'Units','normalize',...
+        'Position',[h.listbox_monte_saved_inv_soln.Position(1) h.listbox_monte_saved_inv_soln.Position(2)-.08 .175 .075],...
+        'FontSize',8,'HorizontalAlignment','center','String',sprintf('TFR Results\n(inv_soln.TFR_results)'),'FontWeight','bold');
+    h.listbox_monte_saved_inv_soln_TFR_results = uicontrol(h.panel_monte_saved_results,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',list_clr,'Style','listbox','Units','normalize',...
+        'Position',[h.listbox_monte_saved_inv_soln_TFR_results_txt.Position(1) h.listbox_monte_saved_inv_soln_TFR_results_txt.Position(2)-h.listbox_monte_saved_inv_soln_TFR_results_txt.Position(2)+.005 h.listbox_monte_saved_inv_soln_TFR_results_txt.Position(3) h.listbox_monte_saved_inv_soln_TFR_results_txt.Position(2)-.01],...
+        'FontSize',8,'HorizontalAlignment','center','String','','Callback',{@sm_update_saved_monte_results,'inv_soln_TFR_results'},...
+        'Value',1,'Max',200);
+    %% Inverse Solutions "inv_soln.soln" if selected
+    % delete(h.listbox_monte_saved_inv_soln_soln_txt); delete(h.listbox_monte_saved_inv_soln_soln);
+    h.listbox_monte_saved_inv_soln_soln_txt = uicontrol(h.panel_monte_saved_results,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',txt_clr,'Units','normalize',...
+        'Position',[sum(h.listbox_monte_saved_inv_soln.Position([1 3]))+.005 h.listbox_monte_saved_inv_soln_txt.Position(2) .175 .075],...
+        'FontSize',8,'HorizontalAlignment','center','String',sprintf('Inverse Solutions\n(inv_soln.soln)'),'FontWeight','bold');
+    h.listbox_monte_saved_inv_soln_soln = uicontrol(h.panel_monte_saved_results,'BackgroundColor',h.UserData.bkg_clr,'ForegroundColor',list_clr,'Style','listbox','Units','normalize',...
+        'Position',[h.listbox_monte_saved_inv_soln_soln_txt.Position(1) h.listbox_monte_saved_inv_soln.Position(2:4)],...
+        'FontSize',8,'HorizontalAlignment','center','String','','Callback',{@sm_update_saved_monte_results,'inv_soln_soln'},...
+        'Value',1,'Max',200);
+    %% Radio convert BS to FieldTrip format and save with Monte Carlo run
+    % delete(h.radio_monte_save_FT_data);
+    h.radio_monte_save_FT_data = uicontrol(h.panel_monte_saved_results,'Style','radiobutton', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor',h.panel_monte_saved_results.ForegroundColor,'Units','normalize',...
+        'Position',[1-.255 .95 .25 .045],...
+        'FontSize',10,'HorizontalAlignment','left','String','Save also Field Trip format','Value',0);
+    %% Btn Update Saved FieldName Lists
+    % delete(h.btn_monte_update_fieldnames);
+    h.btn_monte_update_fieldnames = uicontrol(h.panel_monte_saved_results,'BackgroundColor',[1 .8 .8],'ForegroundColor','k','Style','pushbutton','Units','normalize',...
+        'Position',[.845 h.radio_monte_save_FT_data.Position(2)-.09 .15 .08],...
+        'FontSize',8,'HorizontalAlignment','center','String','Update FieldNames','Value',1,'Callback',{@sm_update_saved_monte_results,'default'});
+
+  
     %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %% %%%%% Button "Export to BST" <-- Not implemented yet because closing SimMEEG call exporting to Brainstorm %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    %    %% Btn Save to Brainstorm if Brainstorm is running
-    %     h.btn_output_bst_data = uicontrol(h.main_fig,'BackgroundColor',[1 1 1]*.4,'ForegroundColor',[1 1 1],'Style','pushbutton','Units','normalize',...
-    %         'Position',[.88 .84 .1 .025],'Visible','on','UserData',1,'Enable','inactive','visible','off',...
-    %         'FontSize',10,'HorizontalAlignment','center','String','Export to BST','Callback',@sm_export_brainstorm_data);
-    %     if isappdata(0, 'BrainstormRunning')
-    %         h.btn_output_bst_data.Enable = 'on';
-    %     else
-    %         warning('Brainstorm is not running. You will not be able to export directly into Brainstorm.');
-    %     end
-    
+       %% Btn Save to Brainstorm if Brainstorm is running
+            h.btn_output_bst_data = uicontrol(h.main_fig,'BackgroundColor',[1 1 1]*.4,'ForegroundColor',[1 1 1],'Style','pushbutton','Units','normalize',...
+               'Position',[.675 .84 .075 .025],'Visible','on','UserData',1,'Enable','inactive','visible','off',...
+               'FontSize',10,'HorizontalAlignment','center','String','Export to BST','Callback',{@sm_bst_ImportSimulations});
+       %% Btn Load data files Brainstorm if Brainstorm is running
+            h.btn_import_bst_data = uicontrol(h.main_fig,'BackgroundColor',[1 1 1]*.8,'ForegroundColor',[1 1 1]*0,'Style','pushbutton','Units','normalize',...
+               'Position',[.595 .84 .075 .025],'Visible','on','UserData',1,'Enable','inactive','visible','off',...
+               'FontSize',10,'HorizontalAlignment','center','String','Import from BST','Callback',{@sm_bst_Import2SimMEEG});
+           if isappdata(0, 'BrainstormRunning')
+               h.btn_output_bst_data.Enable = 'on'; h.btn_output_bst_data.Visible = 'on';
+           else
+               warning('Brainstorm is not running. You will not be able to export directly into Brainstorm.');
+           end
+                  if isappdata(0, 'BrainstormRunning')
+               h.btn_output_bst_data.Enable = 'on'; h.btn_output_bst_data.Visible = 'on';
+               h.btn_import_bst_data.Enable = 'on'; h.btn_import_bst_data.Visible = 'on';
+           else
+               warning('Brainstorm is not running. You will not be able to export directly into Brainstorm.');
+           end
     %% %%%%% Edit "FontSize Gain" %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %% Edit FontSize Gain - for gaining all fontsizes within the main_fig
     h.edit_fontsize_gain_txt = uicontrol(h.main_fig,'Style','text', 'BackgroundColor',h.UserData.bkg_clr,'Foregroundcolor','k','Units','normalize',...
@@ -1644,6 +2183,8 @@ if h.license_flag==1
     update_tfr_roi_cfg([],[]);
     update_monte_carlo;
     h.load_study_flag = 0;  % 1=for loading a saved study; 0=not loading saved study
+    uistack(h.btn_add_triplets,'top'); uistack(h.btn_del_triplets,'top'); uistack(h.menu_triplets,'top');
+    
     
     %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% INITIALIZING Variables %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     h.sim_data = [];
@@ -1684,48 +2225,15 @@ end
 function initialize_cfg_source_data(varargin) %% Initializing h.cfg.source data
 global h
 h.num_sig_freqs=1;
-for v=1:3
-    h.cfg.source.sig_freqs(v,h.num_sig_freqs,:)             = [0 0];
-    h.cfg.source.sig_amp_perc(v,h.num_sig_freqs)            = 0;
-    h.cfg.source.prepost_amp_perc(v,h.num_sig_freqs)        = 0;
-    h.cfg.source.sig_amp_perc_std(v,h.num_sig_freqs)        = 0;
-    h.cfg.source.prepost_amp_perc_std(v,h.num_sig_freqs)    = 0;
-    h.cfg.source.sig_evoked_perc(v,h.num_sig_freqs)         = 0;
-    h.cfg.source.prepost_evoked_perc(v,h.num_sig_freqs)     = 0;
-    h.cfg.source.sig_durs(v,h.num_sig_freqs)                = 0;
-    h.cfg.source.sig_start(v,h.num_sig_freqs)               = 0;
-    h.cfg.source.sig_win_type(v,h.num_sig_freqs)            = 0;
-    h.cfg.source.sig_win_rise_time(v,h.num_sig_freqs)       = 0;
-    
-    h.cfg.source.sig_PLV_targets(v,h.num_sig_freqs)         = 0;  %(PLV_contrasts x Nfreqs);     % for each signal contrast (1-2, 1-3, 2-3) x Nfreqs.
-    h.cfg.source.prepost_PLV_targets(v,h.num_sig_freqs)     = 0;  %(PLV_contrasts x Nfreqs);     % for each signal contrast (1-2, 1-3, 2-3) x Nfreqs.
-    h.cfg.source.sig_PLI_targets(v,h.num_sig_freqs)         = 0;  %(PLV_contrasts x Nfreqs);     % for each signal contrast (1-2, 1-3, 2-3) x Nfreqs.
-    h.cfg.source.prepost_PLI_targets(v,h.num_sig_freqs)     = 0;  %(PLV_contrasts x Nfreqs);     % for each signal contrast (1-2, 1-3, 2-3) x Nfreqs.
-    h.cfg.source.sig_phase_lag(v,h.num_sig_freqs)           = 0;  % phase-lag (radians; relative to sample(1)) of each 3 signals within the signal interval relative to first sample --> (phase_lag/360)*2*pi);    cos(phase_lag) = correlation of signal relative to zero-phase onset
-    h.cfg.source.prepost_phase_lag(v,h.num_sig_freqs)       = 0;  % phase-lag (radians; relative to sample(1)) of each 3 signals within the signal interval relative to first sample --> (phase_lag/360)*2*pi);    cos(phase_lag) = correlation of signal relative to zero-phase onset
-    h.cfg.source.vx_ori(v,:)                                = [0 0 1];  % source orientations (X, Y, Z)
-    h.cfg.source.vx_idx(v)                                  = 1;    % source's voxel index from leadfield positions
-    h.cfg.source.vx_amp(v)                                  = 30;   % nAmps
-    h.cfg.source.vx_locs(v,:)                               = [0 0 0];   % source locations (X, Y, Z)
-end
-h.cfg.study.source_locs_mm = [-5   -95     5; -55   -10     5; 60   -15     5]; %ones(3,3); %[];
+h.cfg.study.source_locs_mm = [ -52    11    57; 3    51    57; 3   -49    57]; %ones(3,3); %[];
+h.cfg.source = source_triplet;
+h.cfg.source.vx_locs = h.cfg.study.source_locs_mm;
+h.cfg.source.src_clr = h.src_clr;
+h.cfg.source.fcn_find_nearest_idx(h.anatomy.leadfield.pos);
 
-% h.cfg.source.phase_amp_contrasts = []; %[1 2; 1 3; 2 1; 2 3; 3 1; 3 2]; % sig_contrasts = cross-frequency contrasts among 3signals % sig_contrasts=[1 2; 1 3; 2 1; 2 3; 3 1; 3 2]; Note: 1st index is the signal amplitude being modulated by the 2nd signal
-% h.cfg.source.sig_phase_amp_freq_idx = []; % [0 0; 0 0; 0 0 ; 0 0 ; 0 0 ; 0 0]; %(sig_contrasts x Nfreqs);  % cross-frequency contrasts among 3signals % sig_contrasts=[1 2; 1 3; 2 1; 2 3; 3 1; 3 2]; Note: 1st index is the signal amplitude being modulated by the 2nd signal
-% h.cfg.source.prepost_phase_amp_freq_idx = []; % [0 0; 0 0; 0 0 ; 0 0 ; 0 0 ; 0 0 ];   %(PLV_contrasts x Nfreqs);     % cross-frequency contrasts among 3signals % sig_contrasts=[1 2; 1 3; 2 1; 2 3; 3 1; 3 2]; Note: 1st index is the signal amplitude being modulated by the 2nd signal
-% h.cfg.source.sig_phase_amp_depth_perc = []; % [0 0; 0 0; 0 0 ; 0 0 ; 0 0 ; 0 0 ]; % amplitude-modulation depth as a percentage of signal's amplitude (sig_amp_perc) modulated at phase of sig_freq(sig_phase_amp_freq_idx)
-% h.cfg.source.prepost_phase_amp_depth_perc = []; % [0 0; 0 0; 0 0 ; 0 0 ; 0 0 ; 0 0 ]; % depth percentage of prepost's amplitude (prepost_amp_perc) modulated at phase of sig_freq(sig_phase_amp_freq_idx)
-% h.cfg.source.sig_phase_amp_depth_perc_range = []; % [0 0; 0 0; 0 0 ; 0 0 ; 0 0 ; 0 0 ]; % +/- range of depth percentage of prepost's amplitude (prepost_amp_perc) modulated at phase of sig_freq(sig_phase_amp_freq_idx). NOTE: sig_phase_amp_depth_perc +/- sig_phase_amp_depth_perc_range must be within [0 100]
-% h.cfg.source.prepost_phase_amp_depth_perc_range = []; % [0 0; 0 0; 0 0 ; 0 0 ; 0 0 ; 0 0 ]; % +/- range devitaion of depth percentage of prepost's amplitude (prepost_amp_perc) modulated at phase of sig_freq(sig_phase_amp_freq_idx). NOTE: prepost_phase_amp_depth_perc +/- prepost_phase_amp_depth_perc_range must be within [0 100]
+%% clean up
+h.menu_triplets.String = {'1'}; h.menu_triplets.Value = 1; 
 
-%% Initializing PAC matrices
-h.cfg.source.phase_amp_contrasts                        = [1 2; 1 3; 2 1; 2 3; 3 1; 3 2]; % These are fixed --> sig_contrasts = cross-frequency contrasts among 3signals % sig_contrasts=[1 2; 1 3; 2 1; 2 3; 3 1; 3 2]; Note: 1st index is the signal amplitude being modulated by the 2nd signal
-h.cfg.source.sig_phase_amp_freq_idx                     = zeros(size(h.cfg.source.phase_amp_contrasts,1), 1); %[0 0; 0 0; 0 0 ; 0 0 ; 0 0 ; 0 0 ]; %(sig_contrasts x Nfreqs);  % cross-frequency contrasts among 3signals % sig_contrasts=[1 2; 1 3; 2 1; 2 3; 3 1; 3 2]; Note: 1st index is the signal amplitude being modulated by the 2nd signal
-h.cfg.source.prepost_phase_amp_freq_idx                 = zeros(size(h.cfg.source.phase_amp_contrasts,1), 1);   %(PLV_contrasts x Nfreqs);     % cross-frequency contrasts among 3signals % sig_contrasts=[1 2; 1 3; 2 1; 2 3; 3 1; 3 2]; Note: 1st index is the signal amplitude being modulated by the 2nd signal
-h.cfg.source.sig_phase_amp_depth_perc                   = h.cfg.source.sig_phase_amp_freq_idx; % amplitude-modulation depth as a percentage of signal's amplitude (sig_amp_perc) modulated at phase of sig_freq(sig_phase_amp_freq_idx)
-h.cfg.source.prepost_phase_amp_depth_perc               = h.cfg.source.sig_phase_amp_freq_idx; % depth percentage of prepost's amplitude (prepost_amp_perc) modulated at phase of sig_freq(sig_phase_amp_freq_idx)
-h.cfg.source.sig_phase_amp_depth_perc_range             = h.cfg.source.sig_phase_amp_freq_idx; % +/- range of depth percentage of prepost's amplitude (prepost_amp_perc) modulated at phase of sig_freq(sig_phase_amp_freq_idx). NOTE: sig_phase_amp_depth_perc +/- sig_phase_amp_depth_perc_range must be within [0 100]
-h.cfg.source.prepost_phase_amp_depth_perc_range         = h.cfg.source.sig_phase_amp_freq_idx; % +/- range devitaion of depth percentage of prepost's amplitude (prepost_amp_perc) modulated at phase of sig_freq(sig_phase_amp_freq_idx). NOTE: prepost_phase_amp_depth_perc +/- prepost_phase_amp_depth_perc_range must be within [0 100]
 
 %% %%%%% Run Simulation %%%%%%%%%%%%%%%
 function run_sim(src,hobj)
@@ -1733,21 +2241,59 @@ global h
 
 h.waitfor_panel.Visible='on'; h.waitfor_txt.String = sprintf('Running PLV/PLI Simulation.\n\nPlease wait ...'); drawnow;
 
-update_study_cfg(src,hobj);
+%% run TFR source simulation
+src.Tag = 'sim'; update_study_cfg(src,hobj);
 update_source_cfg(src,hobj);
-[h.sim_data.sig_final,h.sim_data.sig_wav,h.sim_data.prepost_wav,h.sim_data.noise_wav,h.sim_data.cfg,h.sim_data.prepost_win,h.sim_data.sig_win] = SimSignals(h.cfg);
-% SimSignals_v2 - sets phases for all freqs within an ROI to be same starting phase such that signals line up, BUT not using becuase I haven't fully checked if PLV/PLI are correct after doing this.
-% [h.sim_data.sig_final,h.sim_data.sig_wav,h.sim_data.prepost_wav,h.sim_data.noise_wav,h.sim_data.cfg,h.sim_data.prepost_win,h.sim_data.sig_win] = SimSignals_v2(h.cfg);
+switch h.menu_ARM_add.String{h.menu_ARM_add.Value}
+    case 'Synthetic Only'
+        [h.sim_data.sig_final,h.sim_data.sig_wav,h.sim_data.prepost_wav,h.sim_data.noise_wav,h.sim_data.cfg,h.sim_data.prepost_win,h.sim_data.sig_win] = SimSignals_trips(h.cfg);
+        h.sim_data.source_waveform_type = 'Synthetic Source Signals Only';
+    case 'ARM only'
+        sm_ARM_run_sim();
+        h.sim_data.sig_final = h.sim_data.ARM_source_sig_data; h.sim_data.sig_wav = h.sim_data.ARM_source_sig_data; h.sim_data.prepost_wav = []; h.sim_data.noise_wav = [];
+        h.sim_data.cfg  = h.cfg.ARM_params; h.sim_data.prepost_win = []; h.sim_data.sig_win = [];
+        h.cfg.source.vx_idx = h.cfg.ARM_params.vx_idx;
+        h.cfg.source.vx_amp = h.cfg.ARM_params.vx_amp;
+        h.cfg.source.vx_locs = h.cfg.ARM_params.vx_locs;
+        h.cfg.source.vx_ori = h.cfg.ARM_params.vx_ori;
+        h.cfg.source.sig_amp_perc = h.cfg.ARM_params.sig_amp_perc;
+        h.sim_data.source_waveform_type = 'ARM Source Signals Only';
+    case 'Add Waveforms'
+        [h.sim_data.sig_final,h.sim_data.sig_wav,h.sim_data.prepost_wav,h.sim_data.noise_wav,h.sim_data.cfg,h.sim_data.prepost_win,h.sim_data.sig_win] = SimSignals_trips(h.cfg);
+        sm_ARM_run_sim();
+        h.sim_data.sig_final = h.sim_data.sig_final + h.sim_data.ARM_source_sig_data;
+        h.sim_data.source_waveform_type = 'Added (Synthetic + ARM) source signal waveforms';
+    case 'Concatenate Sources'
+       [h.sim_data.sig_final,h.sim_data.sig_wav,h.sim_data.prepost_wav,h.sim_data.noise_wav,h.sim_data.cfg,h.sim_data.prepost_win,h.sim_data.sig_win] = SimSignals_trips(h.cfg);
+        sm_ARM_run_sim();
+        h.sim_data.sig_final = cat(2,h.sim_data.sig_final,h.sim_data.ARM_source_sig_data);
+        h.cfg.source.vx_idx = cat(2,h.cfg.source.vx_idx,h.cfg.ARM_params.vx_idx);
+        h.cfg.source.vx_amp = cat(2,h.cfg.source.vx_amp,h.cfg.ARM_params.vx_amp);
+        h.cfg.source.vx_locs = cat(1,h.cfg.source.vx_locs,h.cfg.ARM_params.vx_locs);
+        h.cfg.source.vx_ori = cat(1,h.cfg.source.vx_ori,h.cfg.ARM_params.vx_ori);
+        h.sim_data.source_waveform_type = 'Concatenated Synthetic & ARM Sources';
+ end
+h.sim_data.cfg = h.cfg; % updating true source data and parameters to be within sim_data so that loading in previous dataset has original true source data and params.
+%% Run ARM simulation
 
-% display intersource correlations
-for t=1:90; r1(:,:,t) = corr(h.sim_data.sig_final(h.cfg.study.act_samps,:,t)); end
+%% display intersource correlations
+num_trials = str2num(h.edit_num_trials.String);
+for t=1:num_trials; r1(:,:,t) = corr(h.sim_data.sig_final(h.cfg.study.act_samps,:,t)); end
 r2 = corr(nanmean(h.sim_data.sig_final(h.cfg.study.act_samps,:,:),3));
-tb = table(mean(r1,3),r2,'RowNames',{'Source 1' 'Source 2' 'Source 3' },'VariableNames',{'Inter-Source Correlations' 'Inter-Source Correlations Evoked'});
+clear source_names; 
+for v=1:size(r2,1); source_names{v} = sprintf('Source%.f ',v); end
+% tb = table(r2,'RowNames',source_names,'VariableNames',{'Inter-Source Correlations' });
+tb = array2table(r2); tb.Properties.RowNames=source_names; tb.Properties.VariableNames=source_names; tb.Properties.Description = 'Trial Inter-Source Correlations';
 h.sim_data.intersource_correlations = tb;
-display(tb);
+tb_evk = array2table(squeeze(mean(r1,3))); tb_evk.Properties.RowNames=source_names; tb_evk.Properties.VariableNames=source_names; tb.Properties.Description = 'Evoked Inter-Source Correlations';
+h.sim_data.intersource_correlations =tb_evk;
+fprintf('%s\n',tb.Properties.Description); display(tb);
+fprintf('%s\n',tb_evk.Properties.Description); display(tb_evk);
 
-h.sim_data.source_waveform_type = 'Synthetic Sources';
+% h.sim_data.source_waveform_type = 'Synthetic Sources';
 try h.sim_data = rmfield(h.sim_data,'sig_final_org'); catch; end
+
+sm_update_listbox_sources(); % updating source listbox
 
 h.waitfor_panel.Visible='off'; h.waitfor_txt.String = sprintf('Default Message');
 
@@ -1757,39 +2303,18 @@ global h
 [fname,fpath]=uiputfile( '*.mat','Save SimMEEG Study',sprintf('%s_study_parameters',h.edit_study_name.String) );
 h.waitfor_panel.Visible='on'; h.waitfor_txt.String = sprintf('Saving \n\n%s\n\nPlease wait...',fname); drawnow;
 cfg = h.cfg;
+%% saving a snapshot of the current properties  with 'String' & 'Value'of all edit, radio, txt, ... objects
+keep_props = {'String' 'Value'};
+h.monte_params.h = sm_create_h_properties(h,keep_props);
 if isfield (h,'monte_params'); monte_params = h.monte_params; else; monte_params=[]; end
 
-%% Not saving "sim_data" or "inv_data" anymore  -- files are large and inneficient to load back in
-% if isfield (h,'sim_data')
-%     if isfield(h.sim_data,'sens_final_org')
-%         % restoring original data and removing org to save space
-%         h.sim_data.sens_final = h.sim_data.sens_final_org;
-%         h.sim_data.sens_noise_final = h.sim_data.sens_noise_final_org;
-%         h.sim_data.sens_sig_data = h.sim_data.sens_sig_data_org;
-%         h.sim_data.sig_final = h.sim_data.sig_final_org;
-%
-%         %% removing original sens data
-%         if isfield(h.sim_data,'sens_final_org')
-%             h.sim_data = rmfield(h.sim_data,'sens_final_org');
-%             h.sim_data = rmfield(h.sim_data,'sens_noise_final_org');
-%             h.sim_data = rmfield(h.sim_data,'sens_sig_data_org');
-%             h.sim_data = rmfield(h.sim_data,'sig_final_org');
-%         end
-%     end
-%
-%     sim_data = h.sim_data;  sim_data = double2single(sim_data);
-% else
-%     sim_data=[];
-% end
-% if isfield (h,'inv_soln'); inv_soln = h.inv_soln; else; inv_soln=[]; end
 study_name = h.edit_study_name.String;
-% save(fullfile(fpath,fname),'cfg','sim_data','inv_soln','study_name','monte_params');  % saves all figure data to be opened as a new study
-% not saving "sim_data" or "inv_data" anymore  -- files are large and inneficient to load back in
+
 save(fullfile(fpath,fname),'cfg','study_name','monte_params');  % saves all figure data to be opened as a new study
 h.waitfor_panel.Visible='off'; h.waitfor_txt.String = sprintf('Default Message');
 
 % hm.Children(2).Children(1).String(1) = {'File Saved'}; hm.Children(2).Children(1).String(2) = {'Continue'};
-h.main_fig.Name = fname;
+% h.main_fig.Name = fname;
 function load_study(varargin)
 global h
 answ = questdlg('Are you sure you want to close this study and Load a saved study?','Load SimMEEG Study?','Yes','No','No');
@@ -1808,57 +2333,61 @@ switch answ
             clear_TFR_plots;
             %% resetting cfg and data
             h.cfg = cfg;
-            
-            %% update study parameters
-            h.edit_srate.String = sprintf('%.f',cfg.study.srate);
-            h.edit_dur.String = sprintf('%.3f %.3f',cfg.study.dur);
-            h.edit_num_trials.String = sprintf('%.f',cfg.study.num_trials);
-            h.edit_sens_SNR.String = sprintf('%.1f',cfg.study.SNR);
-            h.edit_noise_freqs.String = sprintf('%.1f %.1f',cfg.study.noise_freqs);
-            h.edit_noise_amp_perc.String = sprintf('%.f',cfg.study.noise_amp_perc);
-            h.edit_noise_flag.Value = cfg.study.noise_flag;
-            h.edit_pink_noise_slope.String = sprintf('%.1f',cfg.study.pink_noise_slope);
-            h.edit_base_int.String = sprintf('%.3f %.3f',cfg.study.base_int);
-            h.edit_poststim_int.String = sprintf('%.3f %.3f',cfg.study.poststim_int);
-            h.edit_plv_thresh.String = sprintf('%.2f',cfg.study.plv_thresh);
-            h.edit_max_perm_plv.Value = find(strcmp(num2str(cfg.study.max_perm_plv),h.edit_max_perm_plv.String)==1);
-            h.edit_plot_time_int.String = sprintf('%.3f %.3f',cfg.study.plot_time_int);
-            h.edit_plot_freq_int.String = sprintf('%.1f %.1f',cfg.study.plot_freq_int);
-            h.edit_plot_caxis.String = sprintf('%.f %.f',cfg.study.plot_caxis);
-            h.edit_study_name.String = cfg.study.study_name;
-            
-            %% Not loading "sim_data" or "inv_data" anymore  -- files are large and inneficient to load back in
-            %             sim_data = single2double(sim_data);
-            %             h.inv_soln = inv_soln; h.sim_data = sim_data;
-            %             %% update Listbox in Source Modeling Panel
-            %             xnames='';
-            %             for s=1:length(h.inv_soln); xnames{s} = h.inv_soln(s).ListBox_name; end
-            %             h.listbox_inv_solns.String = xnames; h.listbox_inv_solns.Value=1;
-            %
+      
+            %% resetting entire figure params with String and Values stored in monte.params.h that were captured upon saving the study
+            if isfield(monte_params,'h')
+                h2 = monte_params.h; set_props = {'String' 'Value'}; 
+                
+                % listbox capatability with new version
+                h2.menu_inv_soln.String = {'SPA' 'SIA' 'MIA' 'Dipole' 'LCMV (BST)' 'MNE (BST)' 'sLORETA (BST)' 'LCMV (FT)' 'MNE (FT)' 'sLORETA (FT)' 'eLORETA (FT)' 'SAM (FT)' 'Dipole'};
+                h2.listbox_monte_inv_soln.String = {'SPA' 'SIA' 'MIA' 'Dipole' 'LCMV (BST)' 'MNE (BST)' 'sLORETA (BST)' 'LCMV (FT)' 'MNE (FT)' 'sLORETA (FT)' 'eLORETA (FT)' 'SAM (FT)'  'Dipole'};
+                str = monte_params.h.listbox_monte_inv_soln.String;
+                h2.listbox_monte_inv_soln.Value = find(contains(h2.menu_inv_soln.String,str(monte_params.h.listbox_monte_inv_soln.Value)));    % previously selected
+
+                monte_params.h = h2;
+                sm_set_h_properties(h,set_props,h2);
+                h.monte_params = monte_params;
+            else
+                %% update study parameters
+                h.edit_srate.String = sprintf('%.f',cfg.study.srate);
+                h.edit_dur.String = sprintf('%.3f %.3f',cfg.study.dur);
+                h.edit_num_trials.String = sprintf('%.f',cfg.study.num_trials);
+                h.edit_sens_SNR.String = sprintf('%.1f',cfg.study.SNR);
+                h.edit_noise_freqs.String = sprintf('%.1f %.1f',cfg.study.noise_freqs);
+                h.edit_noise_amp_perc.String = sprintf('%.f',cfg.study.noise_amp_perc);
+                h.edit_noise_flag.Value = cfg.study.noise_flag;
+                h.edit_pink_noise_slope.String = sprintf('%.1f',cfg.study.pink_noise_slope);
+                h.edit_base_int.String = sprintf('%.3f %.3f',cfg.study.base_int);
+                h.edit_poststim_int.String = sprintf('%.3f %.3f',cfg.study.poststim_int);
+                h.edit_plv_thresh.String = sprintf('%.2f',cfg.study.plv_thresh);
+                h.edit_max_perm_plv.Value = find(strcmp(num2str(cfg.study.max_perm_plv),h.edit_max_perm_plv.String)==1);
+                h.edit_plot_time_int.String = sprintf('%.3f %.3f',cfg.study.plot_time_int);
+                h.edit_plot_freq_int.String = sprintf('%.1f %.1f',cfg.study.plot_freq_int);
+                h.edit_plot_caxis.String = sprintf('%.f %.f',cfg.study.plot_caxis);
+                h.edit_study_name.String = cfg.study.study_name;
+                %% update source locs, amps, and ori
+                for v = 1:3
+                    h.edit_source_locs(v).String = sprintf('%.f %.f %.f',h.cfg.study.source_locs_mm(v,:));
+                    h.edit_source_amp(v).String = sprintf('%.f',h.cfg.source.vx_amp(v));
+                    [az,el] = cart2sph(h.cfg.source.vx_ori(v,1),h.cfg.source.vx_ori(v,2),h.cfg.source.vx_ori(v,3));
+                    h.edit_source_ori(v).String = sprintf('%.f %.f',rad2deg(az),rad2deg(el));
+                end
+                h.current_tfr_idx = 1; set_current_ROI('','',1);
+                %% update Monte Carlo
+                if exist('monte_params','var'); h.monte_params = monte_params; load_monte_carlo_params(); end
+                
+            end
             %% clearing "sim_data" and "inv_soln"
             h.sim_data = []; h.inv_soln=[];
             h.listbox_inv_solns.String = ' ';  h.listbox_inv_solns.Value=1; h.current_inv_soln=[];
             
-            %% update source locs, amps, and ori
-            for v = 1:3
-                h.edit_source_locs(v).String = sprintf('%.f %.f %.f',h.cfg.study.source_locs_mm(v,:));
-                h.edit_source_amp(v).String = sprintf('%.f',h.cfg.source.vx_amp(v));
-                [az,el] = cart2sph(h.cfg.source.vx_ori(v,1),h.cfg.source.vx_ori(v,2),h.cfg.source.vx_ori(v,3));
-                h.edit_source_ori(v).String = sprintf('%.f %.f',rad2deg(az),rad2deg(el));
-            end
-            
             replot_study;
             h.load_study_flag = 0; % not loading study
-            h.current_tfr_idx = 1; set_current_ROI('','',1);
             update_source_cfg();
             update_cfg; plot_3D_mri;
             btn_update_PAC_waves();
             
-            
-            %% update Monte Carlo
-            if exist('monte_params','var'); h.monte_params = monte_params; load_monte_carlo_params(); end
-            
-        end
+         end
     case 'No'
 end
 h.waitfor_panel.Visible='off'; h.waitfor_txt.String = sprintf('Default Message');
@@ -1876,13 +2405,13 @@ ha=h.ax_power(1);   % always Source 1 Power axes
 plot_flag=1;
 
 % creating new TFR ROI data for all 3 sources
-for tfr_idx = 1:size(h.cfg.source.sig_freqs,2)
+for tfr_idx = 1:size(h.cfg.source(h.selected_trip).sig_freqs,2)
     for v = 1:3
         
-        p1(1) = h.cfg.source.sig_start(v,tfr_idx);  % signal start
-        offset(1) = h.cfg.source.sig_durs(v,tfr_idx);
-        p1(2) = h.cfg.source.sig_freqs(v,tfr_idx,1);
-        offset(2) = h.cfg.source.sig_freqs(v,tfr_idx,2);
+        p1(1) = h.cfg.source(h.selected_trip).sig_start(v,tfr_idx);  % signal start
+        offset(1) = h.cfg.source(h.selected_trip).sig_durs(v,tfr_idx);
+        p1(2) = h.cfg.source(h.selected_trip).sig_freqs(v,tfr_idx,1);
+        offset(2) = h.cfg.source(h.selected_trip).sig_freqs(v,tfr_idx,2);
         
         
         x = [p1(1) p1(1)+offset(1) p1(1)+offset(1) p1(1) p1(1)];
@@ -1894,32 +2423,32 @@ for tfr_idx = 1:size(h.cfg.source.sig_freqs,2)
         h.tfr_ROI(v).h(tfr_idx).UserData.tfr_idx=tfr_idx;
         h.tfr_ROI(v).h(tfr_idx).UserData.roi.xpos=x;
         h.tfr_ROI(v).h(tfr_idx).UserData.roi.ypos=y;
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_amp=[0 0 1 1 0 0]*h.cfg.source.sig_amp_perc(v,tfr_idx)/100;
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_amp=[1 1 0 0 1 1]*h.cfg.source.prepost_amp_perc(v,tfr_idx)/100;
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_plv=[0 0 1 1 0 0]*h.cfg.source.sig_PLV_targets(v,tfr_idx);
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_plv=[1 1 0 0 1 1]*h.cfg.source.prepost_PLV_targets(v,tfr_idx);
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_pli=[0 0 1 1 0 0]*h.cfg.source.sig_PLI_targets(v,tfr_idx);
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_pli=[1 1 0 0 1 1]*h.cfg.source.prepost_PLI_targets(v,tfr_idx);
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_amp=[0 0 1 1 0 0]*h.cfg.source(h.selected_trip).sig_amp_perc(v,tfr_idx)/100;
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_amp=[1 1 0 0 1 1]*h.cfg.source(h.selected_trip).prepost_amp_perc(v,tfr_idx)/100;
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_plv=[0 0 1 1 0 0]*h.cfg.source(h.selected_trip).sig_PLV_targets(v,tfr_idx);
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_plv=[1 1 0 0 1 1]*h.cfg.source(h.selected_trip).prepost_PLV_targets(v,tfr_idx);
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_pli=[0 0 1 1 0 0]*h.cfg.source(h.selected_trip).sig_PLI_targets(v,tfr_idx);
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_pli=[1 1 0 0 1 1]*h.cfg.source(h.selected_trip).prepost_PLI_targets(v,tfr_idx);
         %         h.tfr_ROI(v).h(tfr_idx).UserData.roi.x_roi= [h.cfg.study.lat_sim(1) x(1) x(1)+range(x)/3 x(2)-range(x)/3 x(2) h.cfg.study.lat_sim(end)]; %[h.cfg.study.plot_time_int(1) x(1) x(1)+range(x)/3 x(2)-range(x)/3 x(2) h.cfg.study.plot_time_int(2)];
         
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.x_roi = [h.cfg.study.lat_sim(1) x(1) x(1)+h.cfg.source.sig_win_rise_time(v,tfr_idx) x(2)-h.cfg.source.sig_win_rise_time(v,tfr_idx) x(2) h.cfg.study.lat_sim(end)];
-        h.edit_tfr_roi_risetime.String = sprintf('%.3f',h.cfg.source.sig_win_rise_time(v,tfr_idx));
-        h.edit_tfr_roi_risetime_PLV.String = sprintf('%.3f',h.cfg.source.sig_win_rise_time(v,tfr_idx));
-        h.edit_tfr_roi_risetime_PLI.String = sprintf('%.3f',h.cfg.source.sig_win_rise_time(v,tfr_idx));
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.x_roi = [h.cfg.study.lat_sim(1) x(1) x(1)+h.cfg.source(h.selected_trip).sig_win_rise_time(v,tfr_idx) x(2)-h.cfg.source(h.selected_trip).sig_win_rise_time(v,tfr_idx) x(2) h.cfg.study.lat_sim(end)];
+        h.edit_tfr_roi_risetime.String = sprintf('%.3f',h.cfg.source(h.selected_trip).sig_win_rise_time(v,tfr_idx));
+        h.edit_tfr_roi_risetime_PLV.String = sprintf('%.3f',h.cfg.source(h.selected_trip).sig_win_rise_time(v,tfr_idx));
+        h.edit_tfr_roi_risetime_PLI.String = sprintf('%.3f',h.cfg.source(h.selected_trip).sig_win_rise_time(v,tfr_idx));
         
-        h.menu_sig_win_type.Value = h.cfg.source.sig_win_type(v,tfr_idx);
+        h.menu_sig_win_type.Value = h.cfg.source(h.selected_trip).sig_win_type(v,tfr_idx);
         
         h.tfr_ROI(v).h(tfr_idx).ButtonDownFcn=@selected_ROI;
         
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_evk_perc = h.cfg.source.sig_evoked_perc(v,tfr_idx);
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_evk_perc = h.cfg.source(h.selected_trip).sig_evoked_perc(v,tfr_idx);
         h.edit_sig_evoked_perc(v).String = num2str(h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_evk_perc);
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_evk_perc = h.cfg.source.prepost_evoked_perc(v,tfr_idx);
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_evk_perc = h.cfg.source(h.selected_trip).prepost_evoked_perc(v,tfr_idx);
         h.edit_prepost_evoked_perc(v).String = num2str(h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_evk_perc);
         
         % PLV info
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_phase_start = rad2deg(h.cfg.source.sig_phase_lag(v,tfr_idx));
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_phase_start = rad2deg(h.cfg.source(h.selected_trip).sig_phase_lag(v,tfr_idx));
         h.edit_sig_phase_start(v).String = num2str(h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_phase_start);
-        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_phase_start = rad2deg(h.cfg.source.prepost_phase_lag(v,tfr_idx));
+        h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_phase_start = rad2deg(h.cfg.source(h.selected_trip).prepost_phase_lag(v,tfr_idx));
         h.edit_prepost_phase_start(v).String = num2str(h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_phase_start);
         
         freqs=round(y(1)):round(y(3));
@@ -1956,9 +2485,9 @@ switch answ
     case 'Yes'
         h.waitfor_panel.Visible='on'; h.waitfor_txt.String = sprintf('\nCreating New study ...\n'); drawnow;
         h.new_study_flag = 1;
-        clear_TFR_plots;
         initialize_cfg_source_data;
-        h.new_study_flag = 0;
+         clear_TFR_plots;
+       h.new_study_flag = 0;
         h.waitfor_panel.Visible='off'; h.waitfor_txt.String = sprintf('Default Message');
     case 'No'
 end
@@ -2020,7 +2549,7 @@ for a=1:3
     h.edit_sig_phase_lag(a).String      = '0.2';
     h.edit_sig_phase_start(a).String    = '0';
     % Prepost
-    h.edit_prepost_power_perc(a).String     = '100';
+    h.edit_prepost_power_perc(a).String     = '50';
     h.edit_prepost_evoked_perc(a).String    = '0';
     h.edit_prepost_phase_locking(a).String  = '0';
     h.edit_prepost_phase_lag(a).String      = '0';
@@ -2070,7 +2599,7 @@ h.axes_invSoln_errors_waves.clo;
 h.cfg.study.source_locs_mm = [-5   -95     5; -55   -10     5; 60   -15     5]; %ones(3,3); %[];
 for v = 1:3
     h.edit_source_locs(v).String = sprintf('%.f %.f %.f',h.cfg.study.source_locs_mm(v,:));
-    h.edit_source_amp(v).String = sprintf('%.f',30);
+    h.edit_source_amp(v).String = sprintf('%.f',60);
     h.edit_source_ori(v).String = sprintf('%.f %.f',0,90);
 end
 update_source_data;
@@ -2096,11 +2625,33 @@ h.edit_monte_source_loc_StdDev_Z.String = h.monte_params.source_loc_StdDev_Z;
 h.edit_monte_source_ori_StdDev_Az.String = num2str(h.monte_params.source_ori_StdDev_Az);
 h.edit_monte_source_ori_StdDev_El.String = num2str(h.monte_params.source_ori_StdDev_El);
 h.edit_monte_SNR_range.String = num2str(h.monte_params.SNR_range); h.edit_monte_SNR_StdDev.String = num2str(h.monte_params.SNR_StdDev);
+h.edit_monte_num_trials.String = num2str(h.monte_params.num_trials ); h.edit_monte_num_trials_StdDev.String = num2str(h.monte_params.num_trials_StdDev);
 h.edit_monte_plv_range.String = num2str(h.monte_params.plv_range); h.edit_monte_plv_StdDev.String = num2str(h.monte_params.plv_StdDev);
+
 h.listbox_monte_inv_soln.Value = h.monte_params.inv_soln;
 h.radio_monte_FC_analysis.Value = h.monte_params.FC_analysis;
 h.radio_monte_save_FT_data.Value = h.monte_params.save_FT_data;
 h.listbox_monte_sens_type.Value = h.monte_params.sens_type;
+h.listbox_monte_MEG_sens_montage.Value = h.monte_params.MEG_sens_montage;
+h.listbox_monte_EEG_sens_montage.Value = h.monte_params.EEG_sens_montage;
+
+try
+h.listbox_monte_saved_sim_data.String = h.monte_params.listbox_monte_saved_sim_data;
+h.listbox_monte_saved_true_source.String = h.monte_params.listbox_monte_saved_true_source;
+h.listbox_monte_saved_true_source_TFR_results.String = h.monte_params.listbox_monte_saved_true_source_TFR_results;
+
+h.listbox_monte_saved_inv_soln.String = h.monte_params.listbox_monte_saved_inv_soln;
+h.listbox_monte_saved_inv_soln_soln.String = h.monte_params.listbox_monte_saved_inv_soln_soln;
+h.listbox_monte_saved_inv_soln_TFR_results.String = h.monte_params.listbox_monte_saved_inv_soln_TFR_results;
+
+h.listbox_monte_saved_sim_data.Value = 1:length(h.listbox_monte_saved_sim_data.String);
+h.listbox_monte_saved_true_source.Value = 1:length(h.listbox_monte_saved_true_source.String);
+h.listbox_monte_saved_true_source_TFR_results.Value = 1:length(h.listbox_monte_saved_true_source_TFR_results.String);
+h.listbox_monte_saved_inv_soln.Value = 1:length(h.listbox_monte_saved_inv_soln.String);
+h.listbox_monte_saved_inv_soln_TFR_results.Value = 1:length(h.listbox_monte_saved_inv_soln_TFR_results.String);
+h.listbox_monte_saved_inv_soln_soln.Value = 1:length(h.listbox_monte_saved_inv_soln_soln.String);
+end
+
 function get_datadir(varargin)
 global h
 data_dir = h.data_dir;
@@ -2130,7 +2681,7 @@ switch answ
             %% resetting cfg and data
             cfg=sim_data.cfg;
             h.cfg = cfg;
-             
+            
             %% update study parameters
             h.edit_srate.String = sprintf('%.f',cfg.study.srate);
             h.edit_dur.String = sprintf('%.3f %.3f',cfg.study.dur);
@@ -2159,27 +2710,43 @@ switch answ
                 h.inv_soln = inv_soln;
                 % update Listbox in Source Modeling Panel
                 xnames='';
-                for s=1:length(h.inv_soln); xnames{s} = h.inv_soln(s).ListBox_name; end
+                try
+                    for s=1:length(h.inv_soln); xnames{s} = h.inv_soln(s).ListBox_name; end
+                catch
+                    
+                    for s=1:length(h.inv_soln)
+                        h.inv_soln(s).ListBox_name = sprintf('%s (%.f-%.f ms) %s',h.inv_soln(s).Type, h.inv_soln(s).params.act_int*1000,h.inv_soln(s).headmodel_type);
+                        
+                        xnames{s} = h.inv_soln(s).ListBox_name;
+                    end
+                end
+                
+                
                 h.listbox_inv_solns.String = xnames; h.listbox_inv_solns.Value=1;
+                
+                
             end
             
             
             %% update source locs, amps, and ori
             for v = 1:3
                 h.edit_source_locs(v).String = sprintf('%.f %.f %.f',h.cfg.study.source_locs_mm(v,:));
-                h.edit_source_amp(v).String = sprintf('%.f',h.cfg.source.vx_amp(v));
-                [az,el] = cart2sph(h.cfg.source.vx_ori(v,1),h.cfg.source.vx_ori(v,2),h.cfg.source.vx_ori(v,3));
+                h.edit_source_amp(v).String = sprintf('%.f',h.cfg.source(h.selected_trip).vx_amp(v));
+                [az,el] = cart2sph(h.cfg.source(h.selected_trip).vx_ori(v,1),h.cfg.source(h.selected_trip).vx_ori(v,2),h.cfg.source(h.selected_trip).vx_ori(v,3));
                 h.edit_source_ori(v).String = sprintf('%.f %.f',rad2deg(az),rad2deg(el));
             end
             
             %% replotting study
-            replot_study;
+try
+    replot_study;
             h.load_study_flag = 0; % not loading study
             h.current_tfr_idx = 1; set_current_ROI('','',1);
             update_source_cfg();
             update_cfg; plot_3D_mri;
             btn_update_PAC_waves();
-            
+catch
+      % simulated params do not exist within the loaded dataset
+end
             
             %% update Monte Carlo
             if exist('monte_params','var'); h.monte_params = monte_params; load_monte_carlo_params(); end
@@ -2188,7 +2755,6 @@ switch answ
     case 'No'
 end
 h.waitfor_panel.Visible='off'; h.waitfor_txt.String = sprintf('Default Message');
-
 function sm_save_SimMEEG_dataset(varargin)
 global h
 
@@ -2230,17 +2796,96 @@ if fname~=0
             end
             
             if isfield (h,'inv_soln'); inv_soln = h.inv_soln; else; inv_soln=[]; end
+
+            leadfield = h.anatomy.leadfield; headmodel = h.anatomy.headmodel; sens = h.anatomy.sens;
+
             study_name = h.edit_study_name.String;
-            save(fullfile(fpath,fname),'cfg','sim_data','inv_soln','study_name','monte_params');  % saves all figure data to be opened as a new study
+            save(fullfile(fpath,fname),'cfg','sim_data','inv_soln','study_name','monte_params','sens','leadfield','headmodel');  % saves all figure data to be opened as a new study
             h.waitfor_panel.Visible='off'; h.waitfor_txt.String = sprintf('Default Message');
             
             % hm.Children(2).Children(1).String(1) = {'File Saved'}; hm.Children(2).Children(1).String(2) = {'Continue'};
-            h.main_fig.Name = fname;
+%             h.main_fig.Name = fname;
         case 'No'
     end
 end
 
 
+%% Add & Update Triplets
+function update_triplet(varargin)
+% This function will add and update source triplets to the h.cfg.source configuration
+global h
+
+
+switch varargin{end}
+    case 'add'
+        h.cfg.study.source_locs_mm = [ -52    11    57; 3    51    57; 3   -49    57]; % default
+        nt = size(h.cfg.source,2)+1; 
+        h.cfg.source(nt) = source_triplet;
+        h.cfg.source(nt).vx_locs = h.cfg.study.source_locs_mm;
+        h.cfg.source(nt).src_clr = h.src_clr;
+        h.cfg.source(nt).fcn_find_nearest_idx(h.anatomy.leadfield.pos);
+        %% adding trip # to menu
+        h.menu_triplets.String = [{num2str([1:length(h.cfg.source)]')}]; % adding 1
+        h.menu_triplets.Value = nt;
+    case 'copy'  % add triplets by copying over the selected triplet to new ones
+        if isempty(h.tfr_ROI)
+            warndlg('Please "Select ROI" for first triplet before adding another triplet','Warning');
+        else
+            %% Adding new triplet - by copying over first triplet to new ones
+            %% get field names
+            fn = fieldnames(h.cfg.source);
+            x = h.cfg.source;  % copy
+            trip_num = str2double(h.menu_triplets.String{h.menu_triplets.Value});   % triplet number selected
+            trip_v = ((trip_num-1)*3)+(1:3);
+            trip_v2 = ((trip_num-1)*6)+(1:6);
+            
+            for f=1:length(fn)
+                dims = size(h.cfg.source.(fn{f}));
+                if length(dims)==2 && dims(1)>=3 && dims(2)>1
+                    if isempty(strfind(fn{f},'phase_amp'))
+                        x.(fn{f}) = cat(1,h.cfg.source.(fn{f}),h.cfg.source.(fn{f})(trip_v,:,:));
+                    elseif ~isempty(strfind(fn{f},'phase_amp'))    % phase_amp has 1:6 rows
+                        x.(fn{f}) = cat(1,h.cfg.source.(fn{f}),h.cfg.source.(fn{f})(trip_v2,:,:));
+                    end
+                elseif length(dims)==3       % sig_freqs
+                    x.(fn{f}) = cat(1,h.cfg.source.(fn{f}),h.cfg.source.(fn{f})(trip_v,:,:));
+                else
+                    if isempty(strfind(fn{f},'phase_amp'))
+                        x.(fn{f}) = [h.cfg.source.(fn{f}) h.cfg.source.(fn{f})(trip_v)];
+                    elseif ~isempty(strfind(fn{f},'phase_amp'))    % phase_amp has 1:6 rows
+                        x.(fn{f}) = [h.cfg.source.(fn{f}) h.cfg.source.(fn{f})(trip_v2)];
+                    end
+                    
+                end
+            end
+            % nt = size(h.cfg.source,2)+1; % added triplet #
+            h.cfg.source = x;
+            
+            %% adding trip # to menu
+            h.menu_triplets.String = [{num2str([1:length(h.menu_triplets.String)+1]')}]; % adding 1
+            h.menu_triplets.Value = length(h.menu_triplets.String);
+            % update_triplet('update');
+        end
+        
+    case 'del'  % delete selected triplets
+        %% Adding new triplet - by copying over first triplet to new ones
+        if isscalar(h.menu_triplets.String)
+            warndlg('Cannot delete last triplet','Warning');
+        else
+            nt = h.menu_triplets.Value;
+            kidx = setdiff(1:size(h.cfg.source,2),nt); % idx for keeping
+            h.cfg.source = h.cfg.source(kidx);
+             %% adding trip # to menu
+            h.menu_triplets.String = [{num2str([1:size(h.cfg.source,2)]')}]; % adding 1
+            h.menu_triplets.Value = size(h.cfg.source,2);
+        end
+    case 'update'   % update h.cfg
+        h.selected_trip = h.menu_triplets.Value;
+
+        %% plot TFRs
+        replot_tfr_data_from_cfg();
+
+end
 
 %% %%%% Updating cfg before simulate data
 function update_cfg(src,hobj)
@@ -2264,9 +2909,10 @@ try
         h.tfr_ROI(v).h(h.current_tfr_idx).UserData.roi.prepost_phase_start = str2num(h.edit_prepost_phase_start(v).String);
         
     end
-    
+%% plot mock source waves
     plot_source_tfr(); plot_source_waves();
     update_monte_carlo();
+  
 catch me
     if h.new_study_flag==0 && h.start_flag==0 && h.load_study_flag==0
         fprintf('Error in "update_cfg"\n%s\n',me.message);
@@ -2277,6 +2923,36 @@ function update_study_cfg(src,~)
 global h
 
 h.cfg.study.study_name = h.edit_study_name.String;
+
+
+try
+    %% Synth Noise ARM seeting & turning on/off Covaraince and ARM boxes
+h.edit_synthetic_noise_cov_exp_txt.Visible = 'off';
+h.edit_synthetic_noise_cov_exp.Visible = 'off';
+h.edit_synthetic_noise_ARM_order_txt.Visible = 'off';
+h.edit_synthetic_noise_ARM_order.Visible = 'off';
+h.edit_synthetic_noise_ARM_interaction_txt.Visible = 'off';
+h.edit_synthetic_noise_ARM_interaction.Visible = 'off';
+if h.menu_synthetic_noise_cov_type.Value==3  || h.menu_synthetic_noise_cov_type.Value==4   % Temporal or Spatiotemporal shaping using ARM
+    h.edit_synthetic_noise_ARM_order_txt.Visible = 'on';
+    h.edit_synthetic_noise_ARM_order.Visible = 'on';
+    h.edit_synthetic_noise_ARM_interaction_txt.Visible = 'on';
+    h.edit_synthetic_noise_ARM_interaction.Visible = 'on';
+else
+    h.edit_synthetic_noise_cov_exp_txt.Visible = 'on';
+    h.edit_synthetic_noise_cov_exp.Visible = 'on';
+end
+
+
+%% checking max ARM interactions allowed for leadfield num sensor
+ARM_int = str2num(h.edit_synthetic_noise_ARM_interaction.String);
+num_chans = size(h.anatomy.leadfield.H,1);
+if ARM_int > (num_chans^2-num_chans)
+    h.edit_synthetic_noise_ARM_interaction.String = num2str(num_chans^2-num_chans);
+end
+catch
+end
+%% Most other updating
 
 if exist('src','var')
     if strcmp(src.Tag,'edit_srate') || strcmp(src.Tag,'edit_dur')   % these will reset study back to beginning clear all plots
@@ -2340,7 +3016,9 @@ if exist('src','var')
                 h.cfg.study.plot_time_vals=h.cfg.study.plot_time_int(1):1/h.cfg.study.srate:h.cfg.study.plot_time_int(2);
                 h.cfg.study.plot_freq_vals=h.cfg.study.plot_freq_int(1):h.cfg.study.plot_freq_int(2);
                 update_graphs();
-                
+
+                h.cfg.study.sensor_noise_cov_exp = 0.273; % default Exponent for Covariance shaping of noise
+
                 % clear all tfr_ROI and plots
                 clear_TFR_plots;
                 
@@ -2354,17 +3032,28 @@ if exist('src','var')
         h.cfg.study.dur=str2num(h.edit_dur.String); % (sec) start and end times for whole trial
         h.cfg.study.lat_sim=[h.cfg.study.dur(1):1/h.cfg.study.srate:h.cfg.study.dur(2)-(1/h.cfg.study.srate)]; % latency of each trial
         h.cfg.study.num_samps=length(h.cfg.study.lat_sim);
-        h.cfg.study.pink_noise_slope = normrnd(1.8,.1,1); % Arbitrarily set to be randomized with overall mean 1.8  % seemed to best match the slope from a couple of resting-state data from LetterAll study
+        if strcmp(src.Tag,'pink_slope')
+            h.cfg.study.pink_noise_slope = str2num(h.edit_pink_noise_slope.String);
+        else
+            h.cfg.study.pink_noise_slope = normrnd(1.8,.1,1); % Arbitrarily set to be randomized with overall mean 1.8  % seemed to best match the slope from a couple of resting-state data from LetterAll study
+        end
         if h.cfg.study.pink_noise_slope<1; h.cfg.study.pink_noise_slope=1; elseif h.cfg.study.pink_noise_slope>2; h.cfg.study.pink_noise_slope=2; end
         h.edit_pink_noise_slope.String = sprintf('%.1f',h.cfg.study.pink_noise_slope);
+        
         h.cfg.study.max_perm_plv = str2num(h.edit_max_perm_plv.String{h.edit_max_perm_plv.Value}); %h.cfg.study.num_trials/10; % integer of cfg.study.num_trials/10 = maximum number of permutations to search for PLV_trials (must be <10 or memory will fail on most computers) .
+        
         h.cfg.study.num_trials = str2num(h.edit_num_trials.String); %{h.edit_num_trials.Value});
-        xr=h.cfg.study.num_trials/h.cfg.study.max_perm_plv;
-        if mod(xr,1)~=0
-            h.cfg.study.num_trials = h.cfg.study.max_perm_plv*round(xr);
-            h.edit_num_trials.String = num2str(h.cfg.study.num_trials);
-            msgbox(sprintf('"Number Trials" must be integer multiple of "PLV Permutations"\n\nNumber Trials = %.f',h.cfg.study.num_trials));
+        % checking trials are equal to perm_plv but only for when "Sim Source Button" fcn is called
+        if strcmp(src.Tag, 'sim')
+            xr=h.cfg.study.num_trials/h.cfg.study.max_perm_plv;
+            if mod(xr,1)~=0
+                h.cfg.study.num_trials = h.cfg.study.max_perm_plv*round(xr);
+                h.edit_num_trials.String = num2str(h.cfg.study.num_trials);
+                msgbox(sprintf('"Number Trials" must be integer multiple of "PLV Permutations"\n\nNumber Trials = %.f',h.cfg.study.num_trials));
+            end
         end
+        
+        
         % chekcing plot frequencies are witihin study parameter limits
         pfreqs = str2num(h.edit_plot_freq_int.String);
         if length(pfreqs)~=2; pfreqs = [1 h.cfg.study.nyq]; end
@@ -2380,6 +3069,14 @@ if exist('src','var')
         h.cfg.study.noise_flag=h.edit_noise_flag.Value;  % Whitening noise to be added to each sources
         h.cfg.study.noise_amp_perc=str2num(h.edit_noise_amp_perc.String); % percent of noise to add to overall signal throughout the num_samps to whiten the data for time-freq analyses.
         h.cfg.study.noise_freqs=str2num(h.edit_noise_freqs.String); % [1 100] Frequency (Hz) of noise to add to overall signal throughout the num_samps to whiten the data for time-freq analyses.
+        [max_freq, max_idx] = max(h.cfg.study.noise_freqs);
+        [min_freq, min_idx] = min(h.cfg.study.noise_freqs);
+        if max_freq>=(h.cfg.study.srate/2); h.cfg.study.noise_freqs(max_idx) = h.cfg.study.srate/2; end
+        if min_freq<=0; h.cfg.study.noise_freqs(min_idx) = 1; end
+        if length(h.cfg.study.noise_freqs)>2; h.cfg.study.noise_freqs = h.cfg.study.noise_freqs(1:2); end
+        h.cfg.study.noise_freqs = sort(h.cfg.study.noise_freqs);
+        h.edit_noise_freqs.String = num2str(h.cfg.study.noise_freqs);
+    
         h.cfg.study.plv_thresh=str2num(h.edit_plv_thresh.String);   % stoppping criterion when search for best PLV/PLI matched to sig_PLV_targets, sig_PLI_targets, etc. (e.g., 0.05).
         h.cfg.study.plot_sim_flag=0; %h.radio_plot_sim_flag.Value;  % plots evoked, trial, and PLV results. Note: This can take time because of filtering.
         h.cfg.study.plot_time_int=str2num(h.edit_plot_time_int.String);   % time interval to plot
@@ -2394,7 +3091,30 @@ if exist('src','var')
         
         h.cfg.study.plot_time_vals=h.cfg.study.plot_time_int(1):1/h.cfg.study.srate:h.cfg.study.plot_time_int(2);
         h.cfg.study.plot_freq_vals=h.cfg.study.plot_freq_int(1):h.cfg.study.plot_freq_int(2);
+        %% Loading in synthetic noise
+        h.cfg.study.synthetic_noise_flag=h.menu_synthetic_noise_flag.Value;  % Whitening noise to be added to each sources
+%         h.cfg.study.synthetic_noise_amp_perc=str2num(h.edit_synthetic_noise_amp_perc.String); % percent of noise to add to overall signal throughout the num_samps to whiten the data for time-freq analyses.
+        h.cfg.study.synthetic_noise_freqs=str2num(h.edit_synthetic_noise_freqs.String); % [1 100] Frequency (Hz) of noise to add to overall signal throughout the num_samps to whiten the data for time-freq analyses.
+        [max_freq, max_idx] = max(h.cfg.study.synthetic_noise_freqs);
+        [min_freq, min_idx] = min(h.cfg.study.synthetic_noise_freqs);
+        if max_freq>=(h.cfg.study.srate/2); h.cfg.study.synthetic_noise_freqs(max_idx) = h.cfg.study.srate/2; end
+        if min_freq<=0; h.cfg.study.synthetic_noise_freqs(min_idx) = 1; end
+        if length(h.cfg.study.synthetic_noise_freqs)>2; h.cfg.study.synthetic_noise_freqs = h.cfg.study.synthetic_noise_freqs(1:2); end
+        h.cfg.study.synthetic_noise_freqs = sort(h.cfg.study.synthetic_noise_freqs);
+        h.edit_synthetic_noise_freqs.String = num2str(h.cfg.study.synthetic_noise_freqs);
+        
+        if strcmp(src.Tag,'synth_pink_slope')
+            h.cfg.study.synthetic_pink_noise_slope = str2num(h.edit_synthetic_pink_noise_slope.String);
+        else
+            h.cfg.study.synthetic_pink_noise_slope = normrnd(1.8,.1,1); % Arbitrarily set to be randomized with overall mean 1.8  % seemed to best match the slope from a couple of resting-state data from LetterAll study
+        end
+        if h.cfg.study.synthetic_pink_noise_slope<1; h.cfg.study.synthetic_pink_noise_slope=1; elseif h.cfg.study.synthetic_pink_noise_slope>2; h.cfg.study.synthetic_pink_noise_slope=2; end
+        h.edit_synthetic_pink_noise_slope.String = sprintf('%.1f',h.cfg.study.synthetic_pink_noise_slope);
+        
         update_graphs();
+        
+        h.cfg.study.sensor_noise_cov_exp = str2num(h.edit_synthetic_noise_cov_exp.String);  %  see citation below
+
     end
 end
 function update_source_cfg(varargin)
@@ -2404,6 +3124,7 @@ global h
 % h.num_sig_freqs=0;
 try
     if isfield(h,'tfr_ROI')
+%         h.cfg.source.vx_idx = [] ; h.cfg.source.vx_amp =[]; h.cfg.source.vx_locs = []; h.cfg.source.vx_ori = []; 
         for v=1:length(h.tfr_ROI)   % sources
             for r = h.current_tfr_idx  %1:length(h.tfr_ROI(v).h)  % ROIs per source
                 if isvalid(h.tfr_ROI(v).h(r))
@@ -2460,6 +3181,9 @@ end
 function bl_rbbox_gca_v2(varargin)  % selects tfr_ROI
 % Select a rectangular region of interest using rbbox.m with coordinates of the current axis and draw a box if plot_flag==1;
 global h
+
+set(gcf,'Pointer','crosshair'); % change mouse pointer style
+
 h.panel_PAC_params.Visible = 'on';
 rotate3d off
 ha=h.ax_power(1);   % always Source 1 Power axes
@@ -2539,6 +3263,8 @@ else % create ROI bounding rectangular box
     btn.Button=1; selected_ROI(h.tfr_ROI(v).h(tfr_idx),btn); % automatically plotting window function
     % end
     h.current_source_num=1; update_tfr_roi_cfg([],[]);
+    set(gcf,'Pointer','arrow'); % change mouse pointer style
+    
 end
 update_source_cfg(); update_PAC();
 function selected_ROI(src,hobj)
@@ -2882,36 +3608,36 @@ global h
 tfr_idx=h.current_tfr_idx;
 for v=1:3
     
-    axes(h.ax_sig_waves(v)); cla; hold on;
+%     axes(h.ax_sig_waves(v)); cla; hold on;
     ft=fit(h.tfr_ROI(v).h(tfr_idx).UserData.roi.x_roi',h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_amp','linearinterp'); xwin=ft(h.cfg.study.lat_sim);     % windowing freq waves
     % ft=fit(h.tfr_ROI(v).h(tfr_idx).UserData.roi.x_roi',h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_amp','gauss1'); xwin=ft(h.cfg.study.lat_sim);     % windowing freq waves
     % xwin=xwin/max(abs(xwin));
     h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_win_final=xwin;
-    h.tfr_ROI(v).h(tfr_idx).UserData.sig_waves=plot(h.cfg.study.lat_sim,bsxfun(@times,h.tfr_ROI(v).h(tfr_idx).UserData.waves',xwin),'color',h.src_clr2(v,:),'linewidth',1);
-    
-    h.tfr_ROI(v).h(tfr_idx).UserData.sig_waves_evk=plot(h.cfg.study.lat_sim,bsxfun(@times,nanmean(h.tfr_ROI(v).h(tfr_idx).UserData.waves,1)',xwin*(str2num(h.edit_sig_evoked_perc(v).String)/100) ),'color',h.src_clr(v,:),'linewidth',2);
-    
-    
+    h.ax_sig_waves(v).NextPlot = 'replace';
+    h.tfr_ROI(v).h(tfr_idx).UserData.sig_waves=plot(h.ax_sig_waves(v), h.cfg.study.lat_sim,bsxfun(@times,h.tfr_ROI(v).h(tfr_idx).UserData.waves',xwin),'color',h.src_clr2(v,:),'linewidth',1);
+    h.ax_sig_waves(v).NextPlot = 'add';
+    h.tfr_ROI(v).h(tfr_idx).UserData.sig_waves_evk=plot(h.ax_sig_waves(v), h.cfg.study.lat_sim,bsxfun(@times,nanmean(h.tfr_ROI(v).h(tfr_idx).UserData.waves,1)',xwin*(str2num(h.edit_sig_evoked_perc(v).String)/100) ),'color',h.src_clr(v,:),'linewidth',2);
     
     %      h.tfr_ROI(v).h(tfr_idx).UserData.sig_waves_evk=plot(h.cfg.study.lat_sim,nanmean(bsxfun(@times,h.tfr_ROI(v).h(tfr_idx).UserData.waves',xwin),2),'color',h.evk_clr(v,:),'linewidth',2);
-    h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_win=plot(h.tfr_ROI(v).h(tfr_idx).UserData.roi.x_roi,h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_amp,'color',h.src_clr2(v,:)*0.2,'linewidth',2,'MarkerFaceColor',h.src_clr2(v,:),'MarkerEdgeColor','none','marker','o','MarkerSize',5,'hittest','on','buttondownfcn',@clickmarker); axis([h.cfg.study.plot_time_int -1 1]);
+    h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_win=plot(h.ax_sig_waves(v),h.tfr_ROI(v).h(tfr_idx).UserData.roi.x_roi,h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_amp,'color',h.src_clr2(v,:)*0.2,'linewidth',2,'MarkerFaceColor',h.src_clr2(v,:),'MarkerEdgeColor','none','marker','o','MarkerSize',5,'hittest','on','buttondownfcn',@clickmarker); axis(h.ax_sig_waves(v),[h.cfg.study.plot_time_int -1 1]);
     %     h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_win.UserData=src.UserData;
     h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_win.UserData.source_num = v; h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_win.UserData.tfr_idx = tfr_idx;
     
-    if v==1; legend([h.tfr_ROI(1).h(tfr_idx).UserData.sig_waves_evk,h.tfr_ROI(v).h(tfr_idx).UserData.sig_waves(1),h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_win],{'evoked' 'freqs' 'window'},'Location','northwest'); end
+    if v==1; legend(h.ax_sig_waves(v),[h.tfr_ROI(1).h(tfr_idx).UserData.sig_waves_evk,h.tfr_ROI(v).h(tfr_idx).UserData.sig_waves(1),h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_win],{'evoked' 'freqs' 'window'},'Location','northwest'); end
     
     h.tfr_ROI(v).h(tfr_idx).UserData.roi.sig_win.UserData.type='signal'; % used to designate which plots when passed to clickmarker
     h.ax_sig_waves(v).YLim = (str2num(h.edit_plot_caxis.String))/100;
     
-    axes(h.ax_prepost_waves(v)); cla; hold on;
+%     axes(h.ax_prepost_waves(v)); cla; hold on;
+    h.ax_prepost_waves(v).NextPlot = 'replace';
     ft=fit(h.tfr_ROI(v).h(tfr_idx).UserData.roi.x_roi',h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_amp','linearinterp'); xwin=ft(h.cfg.study.lat_sim);     % windowing freq waves
     % ft=fit(h.tfr_ROI(v).h(tfr_idx).UserData.roi.x_roi',h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_amp','gauss1'); xwin=ft(h.cfg.study.lat_sim);     % windowing freq waves
     % xwin=1-xwin;
     h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_win_final=xwin;
-    h.tfr_ROI(v).h(tfr_idx).UserData.prepost_waves=plot(h.cfg.study.lat_sim,bsxfun(@times,h.tfr_ROI(v).h(tfr_idx).UserData.waves',xwin),'color',h.src_clr2(v,:),'linewidth',1);
-    h.tfr_ROI(v).h(tfr_idx).UserData.prepost_waves_evk=plot(h.cfg.study.lat_sim,bsxfun(@times,nanmean(h.tfr_ROI(v).h(tfr_idx).UserData.waves,1)',xwin*(str2num(h.edit_prepost_evoked_perc(v).String)/100) ),'color',h.src_clr(v,:),'linewidth',2);
-    
-    h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_win=plot(h.tfr_ROI(v).h(tfr_idx).UserData.roi.x_roi,h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_amp,'color',h.src_clr(v,:)*0.2,'linewidth',2,'MarkerFaceColor','none','MarkerEdgeColor',h.src_clr2(v,:),'marker','o','MarkerSize',5,'hittest','on','buttondownfcn',@clickmarker); axis([h.cfg.study.plot_time_int -1 1]);
+    h.tfr_ROI(v).h(tfr_idx).UserData.prepost_waves=plot(h.ax_prepost_waves(v), h.cfg.study.lat_sim,bsxfun(@times,h.tfr_ROI(v).h(tfr_idx).UserData.waves',xwin),'color',h.src_clr2(v,:),'linewidth',1);
+    h.ax_prepost_waves(v).NextPlot = 'add';
+    h.tfr_ROI(v).h(tfr_idx).UserData.prepost_waves_evk=plot(h.ax_prepost_waves(v), h.cfg.study.lat_sim,bsxfun(@times,nanmean(h.tfr_ROI(v).h(tfr_idx).UserData.waves,1)',xwin*(str2num(h.edit_prepost_evoked_perc(v).String)/100) ),'color',h.src_clr(v,:),'linewidth',2);
+    h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_win=plot(h.ax_prepost_waves(v), h.tfr_ROI(v).h(tfr_idx).UserData.roi.x_roi,h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_amp,'color',h.src_clr(v,:)*0.2,'linewidth',2,'MarkerFaceColor','none','MarkerEdgeColor',h.src_clr2(v,:),'marker','o','MarkerSize',5,'hittest','on','buttondownfcn',@clickmarker); axis(h.ax_prepost_waves(v), [h.cfg.study.plot_time_int -1 1]);
     
     %     h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_win.UserData=src.UserData;
     h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_win.UserData.source_num = v; h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_win.UserData.tfr_idx = tfr_idx;
@@ -2993,13 +3719,15 @@ for v=1:3
         prepost_data = zeros(size(h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_plv_final));
     end
     
-    axes(h.ax_sig_plv(v)); cla; hold on;
-    plot(h.cfg.study.lat_sim, sig_data,'color',h.plv_clr2(v,:)*0,'linewidth',2);
-    axis([h.cfg.study.plot_time_int 0 1]);
+%     axes(h.ax_sig_plv(v)); cla; hold on;
+    h.ax_sig_plv(v).NextPlot = 'replace';
+    plot(h.ax_sig_plv(v), h.cfg.study.lat_sim, sig_data,'color',h.plv_clr2(v,:)*0,'linewidth',2);
+    axis(h.ax_sig_plv(v), [h.cfg.study.plot_time_int 0 1]);
     
-    axes(h.ax_prepost_plv(v)); cla; hold on;
-    plot(h.cfg.study.lat_sim, prepost_data,'color',h.plv_clr2(v,:)*0,'linewidth',2);
-    axis([h.cfg.study.plot_time_int 0 1]);
+%     axes(h.ax_prepost_plv(v)); cla; hold on;
+     h.ax_prepost_plv(v).NextPlot = 'replace';
+   plot(h.ax_prepost_plv(v), h.cfg.study.lat_sim, prepost_data,'color',h.plv_clr2(v,:)*0,'linewidth',2);
+    axis(h.ax_sig_plv(v),[h.cfg.study.plot_time_int 0 1]);
     
     
 end
@@ -3077,13 +3805,15 @@ for v=1:3
         prepost_data = zeros(size(h.tfr_ROI(v).h(tfr_idx).UserData.roi.prepost_pli_final));
     end
     
-    axes(h.ax_sig_pli(v)); cla; hold on;
-    plot(h.cfg.study.lat_sim,  sig_data,'color',h.plv_clr2(v,:)*0,'linewidth',2);
-    axis([h.cfg.study.plot_time_int -1 1]);
+%     axes(h.ax_sig_pli(v)); cla; hold on;
+    h.ax_sig_pli(v).NextPlot = 'replace';
+    plot(h.ax_sig_pli(v), h.cfg.study.lat_sim,  sig_data,'color',h.plv_clr2(v,:)*0,'linewidth',2);
+    axis(h.ax_sig_pli(v), [h.cfg.study.plot_time_int -1 1]);
     
-    axes(h.ax_prepost_pli(v)); cla; hold on;
-    plot(h.cfg.study.lat_sim, prepost_data,'color',h.plv_clr2(v,:)*0,'linewidth',2);
-    axis([h.cfg.study.plot_time_int -1 1]);
+%     axes(h.ax_prepost_pli(v)); cla; hold on;
+   h.ax_prepost_pli(v).NextPlot = 'replace';
+    plot(h.ax_prepost_pli(v), h.cfg.study.lat_sim, prepost_data,'color',h.plv_clr2(v,:)*0,'linewidth',2);
+    axis(h.ax_prepost_pli(v), [h.cfg.study.plot_time_int -1 1]);
     
 end
 h.ax_sig_pli(1).YLabel.String = 'dPLI';
@@ -3634,12 +4364,14 @@ end
 %% Anatomy
 function load_default_anatomy(varargin)
 global h
+
+h.menu_sens_montage.Value = 1;
 % h.anatomy = struct('mri','','sens_eeg','','sens_meg','','mesh_volumes',[],'headmodel_eeg_vol','','headmodel_meg_vol','','headmodel_eeg_cortex','','headmodel_meg_cortex','','leadfield_eeg_vol','','leadfield_eeg_cortex','','leadfield_meg_vol','','leadfield_meg_cortex','','sens','','headmodel','','leadfield','','mesh_cortex','');
 if h.start_flag == 1 % starting up SimMEEG -loads default anatomy
     % fpath = 'C:\BRANELab\matlab_progs\general_progs\EEG_sim\SimSignals_GUI\anatomy';
     %     h.anat_path = 'F:\brainstorm_db\SimMEEG_anat\data\S001_MEG_EEG\@default_study\';
     fpath = h.anat_path;
-    h.anat_file = 'ANATOMY_DEFAULT_adult_SimMEEG_v19.mat';
+    h.anat_file = 'ANATOMY_DEFAULT_adult_SimMEEG_v23.mat';
     if exist(fullfile(fpath,h.anat_file),'file')
         h.waitfor_panel.Visible='on'; h.waitfor_txt.String = sprintf('Loading Default Anatomy\n\n%s\n',h.anat_file); %drawnow;
     else
@@ -3657,137 +4389,162 @@ elseif h.start_flag == 0
         h.waitfor_panel.Visible='on';  h.waitfor_txt.String = sprintf('Loading Default Anatomy\n\n%s\n',h.anat_file); drawnow;
     else
     end
-    
+
 end
 % try
 fprintf('loading Anatomy File: %s\n',h.anat_file);
 
 
-try
-    h.anatomy=load(fullfile(h.anat_path,h.anat_file),'mri','sens_eeg','sens_meg','sens_meg','mesh_volumes','headmodel_eeg_vol','headmodel_meg_vol',...
-        'headmodel_eeg_cortex','headmodel_meg_cortex','leadfield_eeg_vol','leadfield_eeg_cortex','leadfield_meg_vol','leadfield_meg_cortex');
-    
-    if strcmp(h.anat_file,'ANATOMY_DEFAULT_adult_SimMEEG_v16.mat')  % reordering meshc_volumes because leadfiels in v16 were based on white matter (mesh_volumes(5)) and not pial surface (mesh_volumes(4))
-        h.anatomy.mesh_cortex = h.anatomy.mesh_volumes(4);
-        h.anatomy.mesh_volumes(4) = h.anatomy.mesh_volumes(5);
-    end
-    
-    for a=1:length(h.anatomy.mesh_volumes); h.anatomy.mesh_volumes(a) = ft_convert_units(h.anatomy.mesh_volumes(a),'mm'); end
-    %% convert all units to 'mm'
-    if ~isempty(h.anatomy.sens_eeg);  h.anatomy.sens_eeg = ft_convert_units(h.anatomy.sens_eeg,'mm'); end
-    if ~isempty(h.anatomy.sens_meg);  h.anatomy.sens_meg = ft_convert_units(h.anatomy.sens_meg,'mm'); end
-    if ~isempty(h.anatomy.mri);       h.anatomy.mri = ft_convert_units(h.anatomy.mri,'mm'); end
-    
-    
-    if ~isempty(h.anatomy.headmodel_eeg_cortex);    h.anatomy.headmodel_eeg_cortex = ft_convert_units(h.anatomy.headmodel_eeg_cortex,'mm'); end
-    if ~isempty(h.anatomy.headmodel_eeg_vol);       h.anatomy.headmodel_eeg_vol = ft_convert_units(h.anatomy.headmodel_eeg_vol,'mm'); end
-    if ~isempty(h.anatomy.headmodel_meg_cortex);    h.anatomy.headmodel_meg_cortex = ft_convert_units(h.anatomy.headmodel_meg_cortex,'mm'); end
-    if ~isempty(h.anatomy.headmodel_meg_vol);       h.anatomy.headmodel_meg_vol = ft_convert_units(h.anatomy.headmodel_meg_vol,'mm'); end
-    
-    
-    if ~isempty(h.anatomy.leadfield_eeg_cortex); h.anatomy.leadfield_eeg_cortex = ft_convert_units(h.anatomy.leadfield_eeg_cortex,'mm'); end
-    if ~isempty(h.anatomy.leadfield_eeg_vol); h.anatomy.leadfield_eeg_vol = ft_convert_units(h.anatomy.leadfield_eeg_vol,'mm'); end
-    if ~isempty(h.anatomy.leadfield_meg_cortex); h.anatomy.leadfield_meg_cortex = ft_convert_units(h.anatomy.leadfield_meg_cortex,'mm'); end
-    if ~isempty(h.anatomy.leadfield_meg_vol); h.anatomy.leadfield_meg_vol = ft_convert_units(h.anatomy.leadfield_meg_vol,'mm'); end
-    
-    %% make sens compatbile with SimMEEG
-    if ~isempty(h.anatomy.sens_meg)
-        h.anatomy.sens_meg = sm_make_sens_compatible(h.anatomy.sens_meg,'meg');
-        cfg.sens_type = 'meg'; cfg.sens_idx = 1:length(h.anatomy.sens_meg.label); h.anatomy.sens_meg = bs_select_meeg_sensors(cfg,h.anatomy.sens_meg);
-    end
-    if ~isempty(h.anatomy.sens_eeg)
-        h.anatomy.sens_eeg = sm_make_sens_compatible(h.anatomy.sens_eeg,'eeg');
-        cfg.sens_type = 'eeg'; cfg.sens_idx = 1:length(h.anatomy.sens_eeg.label); h.anatomy.sens_eeg = bs_select_meeg_sensors(cfg,h.anatomy.sens_eeg);
-    end
-    
-    %% add BRANELab leadfield format
-    if ~isempty(h.anatomy.leadfield_eeg_cortex)
-        x=cell2mat(h.anatomy.leadfield_eeg_cortex.leadfield(h.anatomy.leadfield_eeg_cortex.inside==1));
-        h.anatomy.leadfield_eeg_cortex.H=reshape(x,[size(x,1) 3 size(x,2)/3]);
-        h.anatomy.leadfield_eeg_cortex.voxel_pos=h.anatomy.leadfield_eeg_cortex.pos(h.anatomy.leadfield_eeg_cortex.inside,:); % brain voxel locations --> these correspond to the 16008 positions for the leadfield.H
-        h.anatomy.leadfield_eeg_cortex.voxel_res=[]; % resolution not available for cortical surface
-    end
-    if ~isempty(h.anatomy.leadfield_meg_cortex)
-        x=cell2mat(h.anatomy.leadfield_meg_cortex.leadfield(h.anatomy.leadfield_meg_cortex.inside==1));
-        h.anatomy.leadfield_meg_cortex.H=reshape(x,[size(x,1) 3 size(x,2)/3]);
-        h.anatomy.leadfield_meg_cortex.voxel_pos=h.anatomy.leadfield_meg_cortex.pos(h.anatomy.leadfield_meg_cortex.inside,:); % brain voxel locations --> these correspond to the 16008 positions for the leadfield.H
-        h.anatomy.leadfield_meg_cortex.voxel_res=[]; % resolution not available for cortical surface
-    end
-    if ~isempty(h.anatomy.leadfield_eeg_vol)
-        x=cell2mat(h.anatomy.leadfield_eeg_vol.leadfield(h.anatomy.leadfield_eeg_vol.inside==1));
-        h.anatomy.leadfield_eeg_vol.H=reshape(x,[size(x,1) 3 size(x,2)/3]);
-        h.anatomy.leadfield_eeg_vol.voxel_pos=h.anatomy.leadfield_eeg_vol.pos(h.anatomy.leadfield_eeg_vol.inside,:); % brain voxel locations --> these correspond to the 16008 positions for the leadfield.H
-        vx_res = diff(h.anatomy.leadfield_eeg_vol.voxel_pos(:,1)); vx_res = min(abs(vx_res(vx_res~=0)));
-        h.anatomy.leadfield_eeg_vol.voxel_res = vx_res;
-    end
-    if ~isempty(h.anatomy.leadfield_meg_vol)
-        x=cell2mat(h.anatomy.leadfield_meg_vol.leadfield(h.anatomy.leadfield_meg_vol.inside==1));
-        h.anatomy.leadfield_meg_vol.H=reshape(x,[size(x,1) 3 size(x,2)/3]);
-        h.anatomy.leadfield_meg_vol.voxel_pos=h.anatomy.leadfield_meg_vol.pos(h.anatomy.leadfield_meg_vol.inside,:); % brain voxel locations --> these correspond to the 16008 positions for the leadfield.H
-        vx_res = diff(h.anatomy.leadfield_eeg_vol.voxel_pos(:,1)); vx_res = min(abs(vx_res(vx_res~=0)));
-        h.anatomy.leadfield_eeg_vol.voxel_res = vx_res;
-    end
-    
-    %% default starting with MEG
-    if ~isempty(h.anatomy.sens_meg)
-        h.anatomy.sens = h.anatomy.sens_meg; h.menu_sens_type.Value = 1;
-        if ~isempty(h.anatomy.headmodel_meg_vol)
-            h.anatomy.headmodel = h.anatomy.headmodel_meg_vol;
-            h.anatomy.leadfield = h.anatomy.leadfield_meg_vol;
-        elseif ~isempty(h.anatomy.headmodel_meg_cortex)
-            h.anatomy.headmodel = h.anatomy.headmodel_meg_cortex;
-            h.anatomy.leadfield = h.anatomy.leadfield_meg_cortex;
-        else
-            h.anatomy.headmodel = [];
-            h.anatomy.leadfield =[];
-        end
-    elseif ~isempty(h.anatomy.sens_eeg) && isempty(h.anatomy.sens_meg)
-        h.anatomy.sens = h.anatomy.sens_eeg; h.menu_sens_type.Value = 1;
-        if ~isempty(h.anatomy.headmodel_eeg_vol)
-            h.anatomy.headmodel = h.anatomy.headmodel_eeg_vol;
-            h.anatomy.leadfield = h.anatomy.leadfield_eeg_vol;
-        elseif ~isempty(h.anatomy.headmodel_eeg_cortex)
-            h.anatomy.headmodel = h.anatomy.headmodel_eeg_cortex;
-            h.anatomy.leadfield = h.anatomy.leadfield_eeg_cortex;
-        else
-            h.anatomy.headmodel = [];
-            h.anatomy.leadfield =[];
-        end
-    end
-    
-    
-    if length(h.anatomy.mesh_volumes)>3
-        h.anatomy.mesh_cortex = h.anatomy.mesh_volumes(5);
-    else
-        h.anatomy.mesh_cortex = h.anatomy.mesh_volumes(3);
-    end
-    update_anatomy_fields;
-    
-    
-catch
-    txt = [sprintf('\nPlease create SimMEEG Anatomy Structure, save as .mat file, and then load them into SimMEEG\n\nSee FieldTrip Tutorial: http://www.fieldtriptoolbox.org/tutorial/headmodel_eeg_bem/ \n\n'),...
-        sprintf('Make sure the anatomy .mat file has the following variables:\n\n'), ...
-        sprintf('          mri\n'), sprintf('          sens_eeg\n'),sprintf('          sens_meg\n'),...
-        sprintf('          headmodel_eeg_vol\n'), sprintf('          headmodel_meg_vol\n'), ...
-        sprintf('          headmodel_eeg_cortex\n'), sprintf('          headmodel_meg_cortex\n'),...
-        sprintf('          mesh_volumes\n'),...
-        sprintf('          leadfield_eeg_vol\n'), sprintf('          leadfield_eeg_cortex\n'), sprintf('          leadfield_meg_vol\n'),...
-        sprintf('          leadfield_meg_cortex\n')];
-    
-    %% Clearing Anatomy Strings and Turning off Head Model menu
-    h.anatomy_file_txt.String = sprintf('%s',h.anat_file);
-    h.mri_txt.String = sprintf('No Anatomy Loaded');
-    h.sensors_txt.String = sprintf('Missing Anatomy Fields');
-    h.headmodel_txt.String = sprintf('or wrong formats');
-    h.leadfield_txt.String = sprintf(' ');
-    h.menu_head_model.Enable = 'inactive';
-    h.menu_sens_type.Enable = 'inactive';
-    h.menu_head_model.Value = 1;
-    h.menu_head_model.BackgroundColor = [1 1 1]*.9;  h.menu_head_model.ForegroundColor = [1 1 1]*.4;
-    
-    w = warndlg(txt);
-    w.Position=[h.main_fig.Position(1:2)+100 500 350]; htext = findobj(w, 'Type', 'Text'); htext.FontSize = h.font_size_warndlg; htext.HorizontalAlignment = 'left';
+% try
+h.anatomy=load(fullfile(h.anat_path,h.anat_file),'mri','sens_eeg','sens_meg','sens_meg','mesh_volumes','headmodel_eeg*','headmodel_meg*',...
+    'leadfield_eeg*','leadfield_meg*');
+if ~isfield(h.anatomy,'sens_meg') % default empty for MEG sensors if they don't exist
+    h.anatomy.sens_meg = [];
+    h.anatomy.headmodel_meg_vol = []; h.anatomy.headmodel_meg_cortex = [];
+    h.anatomy.leadfield_meg_vol = []; h.anatomy.leadfield_meg_cortex = [];
 end
+
+if strcmp(h.anat_file,'ANATOMY_DEFAULT_adult_SimMEEG_v16.mat')  % reordering meshc_volumes because leadfiels in v16 were based on white matter (mesh_volumes(5)) and not pial surface (mesh_volumes(4))
+    h.anatomy.mesh_cortex = h.anatomy.mesh_volumes(4);
+    h.anatomy.mesh_volumes(4) = h.anatomy.mesh_volumes(5);
+end
+
+for a=1:length(h.anatomy.mesh_volumes); h.anatomy.mesh_volumes(a) = ft_convert_units(h.anatomy.mesh_volumes(a),'mm'); end
+%% convert all units to 'mm'
+if ~isempty(h.anatomy.sens_eeg);  for n=1:length(h.anatomy.sens_eeg); h.anatomy.sens_eeg(n) = ft_convert_units(h.anatomy.sens_eeg(n),'mm'); end; end
+if ~isempty(h.anatomy.sens_meg);  for n=1:length(h.anatomy.sens_meg); h.anatomy.sens_meg(n) = ft_convert_units(h.anatomy.sens_meg(n),'mm'); end; end
+if ~isempty(h.anatomy.mri);       h.anatomy.mri = ft_convert_units(h.anatomy.mri,'mm'); end
+
+
+if ~isempty(h.anatomy.headmodel_eeg_cortex);    for n=1:length(h.anatomy.headmodel_eeg_cortex); h.anatomy.headmodel_eeg_cortex(n) = ft_convert_units(h.anatomy.headmodel_eeg_cortex(n),'mm'); end; end
+if ~isempty(h.anatomy.headmodel_eeg_vol);       for n=1:length(h.anatomy.headmodel_eeg_vol); h.anatomy.headmodel_eeg_vol(n) = ft_convert_units(h.anatomy.headmodel_eeg_vol(n),'mm'); end; end
+if ~isempty(h.anatomy.headmodel_meg_cortex);    for n=1:length(h.anatomy.headmodel_meg_cortex); h.anatomy.headmodel_meg_cortex(n) = ft_convert_units(h.anatomy.headmodel_meg_cortex(n),'mm'); end; end
+if ~isempty(h.anatomy.headmodel_meg_vol);       for n=1:length(h.anatomy.headmodel_meg_vol); h.anatomy.headmodel_meg_vol(n) = ft_convert_units(h.anatomy.headmodel_meg_vol(n),'mm'); end; end
+
+
+if ~isempty(h.anatomy.leadfield_eeg_cortex);    for n=1:length(h.anatomy.leadfield_eeg_cortex); h.anatomy.leadfield_eeg_cortex(n) = ft_convert_units(h.anatomy.leadfield_eeg_cortex(n),'mm'); end; end
+if ~isempty(h.anatomy.leadfield_eeg_vol);       for n=1:length(h.anatomy.leadfield_eeg_vol);    h.anatomy.leadfield_eeg_vol(n) = ft_convert_units(h.anatomy.leadfield_eeg_vol(n),'mm'); end; end
+if ~isempty(h.anatomy.leadfield_meg_cortex);    for n=1:length(h.anatomy.leadfield_meg_cortex); h.anatomy.leadfield_meg_cortex(n) = ft_convert_units(h.anatomy.leadfield_meg_cortex(n),'mm'); end; end
+if ~isempty(h.anatomy.leadfield_meg_vol);       for n=1:length(h.anatomy.leadfield_meg_vol);    h.anatomy.leadfield_meg_vol(n) = ft_convert_units(h.anatomy.leadfield_meg_vol(n),'mm'); end; end
+
+%% make sens compatbile with SimMEEG
+if ~isempty(h.anatomy.sens_meg)
+    sens_meg = h.anatomy.sens_meg; h.anatomy = rmfield(h.anatomy,'sens_meg');
+    for n=1:length(sens_meg)
+        xsens = sm_make_sens_compatible(sens_meg(n),'meg');
+        cfg.sens_type = 'meg'; cfg.sens_idx = 1:length(xsens.label); xsens = bs_select_meeg_sensors(cfg,xsens);
+        h.anatomy.sens_meg(n) =xsens;
+    end
+end
+if ~isempty(h.anatomy.sens_eeg)
+    sens_eeg = h.anatomy.sens_eeg; h.anatomy = rmfield(h.anatomy,'sens_eeg');
+    for n=1:length(sens_eeg)
+        xsens = sm_make_sens_compatible(sens_eeg(n),'eeg');
+        cfg.sens_type = 'eeg'; cfg.sens_idx = 1:length(xsens.label); xsens = bs_select_meeg_sensors(cfg,xsens);
+        h.anatomy.sens_eeg(n) =xsens;
+    end
+end
+
+%% add BRANELab leadfield format
+if ~isempty(h.anatomy.leadfield_eeg_cortex)
+    for n=1:length(h.anatomy.leadfield_eeg_cortex)
+        x=cell2mat(h.anatomy.leadfield_eeg_cortex(n).leadfield(h.anatomy.leadfield_eeg_cortex(n).inside==1));
+        h.anatomy.leadfield_eeg_cortex(n).H=reshape(x,[size(x,1) 3 size(x,2)/3]);
+        h.anatomy.leadfield_eeg_cortex(n).voxel_pos=h.anatomy.leadfield_eeg_cortex(n).pos(h.anatomy.leadfield_eeg_cortex(n).inside,:); % brain voxel locations --> these correspond to the 16008 positions for the leadfield.H
+        h.anatomy.leadfield_eeg_cortex(n).voxel_res=[]; % resolution not available for cortical surface
+    end
+end
+if ~isempty(h.anatomy.leadfield_meg_cortex)
+    for n=1:length(h.anatomy.leadfield_meg_cortex)
+        x=cell2mat(h.anatomy.leadfield_meg_cortex(n).leadfield(h.anatomy.leadfield_meg_cortex(n).inside==1));
+        h.anatomy.leadfield_meg_cortex(n).H=reshape(x,[size(x,1) 3 size(x,2)/3]);
+        h.anatomy.leadfield_meg_cortex(n).voxel_pos=h.anatomy.leadfield_meg_cortex(n).pos(h.anatomy.leadfield_meg_cortex(n).inside,:); % brain voxel locations --> these correspond to the 16008 positions for the leadfield.H
+        h.anatomy.leadfield_meg_cortex(n).voxel_res=[]; % resolution not available for cortical surface
+    end
+end
+if ~isempty(h.anatomy.leadfield_eeg_vol)
+    for n=1:length(h.anatomy.leadfield_eeg_vol)
+        x=cell2mat(h.anatomy.leadfield_eeg_vol(n).leadfield(h.anatomy.leadfield_eeg_vol(n).inside==1));
+        h.anatomy.leadfield_eeg_vol(n).H=reshape(x,[size(x,1) 3 size(x,2)/3]);
+        h.anatomy.leadfield_eeg_vol(n).voxel_pos=h.anatomy.leadfield_eeg_vol(n).pos(h.anatomy.leadfield_eeg_vol(n).inside,:); % brain voxel locations --> these correspond to the 16008 positions for the leadfield.H
+        vx_res = diff(h.anatomy.leadfield_eeg_vol(n).voxel_pos(:,1)); vx_res = min(abs(vx_res(vx_res~=0)));
+        h.anatomy.leadfield_eeg_vol(n).voxel_res = vx_res;
+    end
+end
+if ~isempty(h.anatomy.leadfield_meg_vol)
+    for n=1:length(h.anatomy.leadfield_meg_vol)
+        x=cell2mat(h.anatomy.leadfield_meg_vol(n).leadfield(h.anatomy.leadfield_meg_vol(n).inside==1));
+        h.anatomy.leadfield_meg_vol(n).H=reshape(x,[size(x,1) 3 size(x,2)/3]);
+        h.anatomy.leadfield_meg_vol(n).voxel_pos=h.anatomy.leadfield_meg_vol(n).pos(h.anatomy.leadfield_meg_vol(n).inside,:); % brain voxel locations --> these correspond to the 16008 positions for the leadfield.H
+        vx_res = diff(h.anatomy.leadfield_eeg_vol(n).voxel_pos(:,1)); vx_res = min(abs(vx_res(vx_res~=0)));
+        h.anatomy.leadfield_eeg_vol(n).voxel_res = vx_res;
+    end
+end
+
+%% default starting with MEG
+if ~isempty(h.anatomy.sens_meg)
+    h.anatomy.sens = h.anatomy.sens_meg; h.menu_sens_type.Value = 1;
+    if ~isempty(h.anatomy.headmodel_meg_vol)
+        h.anatomy.headmodel = h.anatomy.headmodel_meg_vol;
+        h.anatomy.leadfield = h.anatomy.leadfield_meg_vol;
+    elseif ~isempty(h.anatomy.headmodel_meg_cortex)
+        h.anatomy.headmodel = h.anatomy.headmodel_meg_cortex;
+        h.anatomy.leadfield = h.anatomy.leadfield_meg_cortex;
+    else
+        h.anatomy.headmodel = [];
+        h.anatomy.leadfield =[];
+    end
+elseif ~isempty(h.anatomy.sens_eeg) && isempty(h.anatomy.sens_meg)
+    h.anatomy.sens = h.anatomy.sens_eeg; h.menu_sens_type.Value = 1;
+    if ~isempty(h.anatomy.headmodel_eeg_vol)
+        chnum = []; for m=1:size(h.anatomy.headmodel_eeg_vol,2); chnum(m) = size(h.anatomy.headmodel_eeg_vol(m).label,1); end
+        sidx = find(chnum==size(h.anatomy.sens.label,1)); sidx = sidx(1);
+        h.anatomy.headmodel = h.anatomy.headmodel_eeg_vol(sidx);
+        h.anatomy.leadfield = h.anatomy.leadfield_eeg_vol(sidx);
+    elseif ~isempty(h.anatomy.headmodel_eeg_cortex)
+        chnum = []; for m=1:size(h.anatomy.headmodel_eeg_cortex,2); chnum(m) = size(h.anatomy.headmodel_eeg_cortex(m).label,1); end
+        sidx = find(chnum==size(h.anatomy.sens.label,1)); sidx = sidx(1);
+        h.anatomy.headmodel = h.anatomy.headmodel_eeg_cortex(sidx);
+        h.anatomy.leadfield = h.anatomy.leadfield_eeg_cortex(sidx);
+    else
+        h.anatomy.headmodel = [];
+        h.anatomy.leadfield =[];
+    end
+end
+
+
+if length(h.anatomy.mesh_volumes)>3
+    h.anatomy.mesh_cortex = h.anatomy.mesh_volumes(5);
+else
+    h.anatomy.mesh_cortex = h.anatomy.mesh_volumes(3);
+end
+update_anatomy_fields;
+
+
+% catch
+%     txt = [sprintf('\nPlease create SimMEEG Anatomy Structure, save as .mat file, and then load them into SimMEEG\n\nSee FieldTrip Tutorial: http://www.fieldtriptoolbox.org/tutorial/headmodel_eeg_bem/ \n\n'),...
+%         sprintf('Make sure the anatomy .mat file has the following variables:\n\n'), ...
+%         sprintf('          mri\n'), sprintf('          sens_eeg\n'),sprintf('          sens_meg\n'),...
+%         sprintf('          headmodel_eeg_vol\n'), sprintf('          headmodel_meg_vol\n'), ...
+%         sprintf('          headmodel_eeg_cortex\n'), sprintf('          headmodel_meg_cortex\n'),...
+%         sprintf('          mesh_volumes\n'),...
+%         sprintf('          leadfield_eeg_vol\n'), sprintf('          leadfield_eeg_cortex\n'), sprintf('          leadfield_meg_vol\n'),...
+%         sprintf('          leadfield_meg_cortex\n')];
+%
+%     %% Clearing Anatomy Strings and Turning off Head Model menu
+%     h.anatomy_file_txt.String = sprintf('%s',h.anat_file);
+%     h.mri_txt.String = sprintf('No Anatomy Loaded');
+%     h.sensors_txt.String = sprintf('Missing Anatomy Fields');
+%     h.headmodel_txt.String = sprintf('or wrong formats');
+%     h.leadfield_txt.String = sprintf(' ');
+%     h.menu_head_model.Enable = 'inactive';
+%     h.menu_sens_type.Enable = 'inactive';
+%     h.menu_head_model.Value = 1;
+%     h.menu_head_model.BackgroundColor = [1 1 1]*.9;  h.menu_head_model.ForegroundColor = [1 1 1]*.4;
+%
+%     w = warndlg(txt);
+%     w.Position=[h.main_fig.Position(1:2)+100 500 350]; htext = findobj(w, 'Type', 'Text'); htext.FontSize = h.font_size_warndlg; htext.HorizontalAlignment = 'left';
+% end
 try plot_3D_mri; catch; end
 h.listbox_chans.Value=1;
 
@@ -3804,13 +4561,14 @@ try
     h.pwd = pwd; cd(fpath);
     fprintf('loading Default Anatomy File: %s\n',h.anat_file);
     rmfield(h,'anatomy');
-    h.anatomy=load(h.anat_file,'mri','please_read','sens_eeg','sens_meg','headmodel_eeg','headmodel_meg','mesh_volumes',...
-        'leadfield_eeg_vol','leadfield_eeg_cortex','leadfield_meg_vol','leadfield_meg_cortex');
+    h.anatomy=load(h.anat_file,'mri','please_read','sens_eeg','sens_meg','headmodel_eeg*','headmodel_meg*','mesh_volumes',...
+        'leadfield_eeg*','leadfield_meg*');
     
+    h.menu_sens_montage.Value = 1; % always start with first instance
     % default starting with EEG
-    h.anatomy.sens = h.anatomy.sens_eeg;
-    h.anatomy.headmodel = h.anatomy.headmodel_eeg;
-    h.anatomy.leadfield = h.anatomy.leadfield_eeg_vol;
+    h.anatomy.sens = h.anatomy.sens_eeg(h.menu_sens_montage.Value);
+    h.anatomy.headmodel = h.anatomy.headmodel_eeg(h.menu_sens_montage.Value);
+    h.anatomy.leadfield = h.anatomy.leadfield_eeg_vol(h.menu_sens_montage.Value);
     h.anatomy.mesh_cortex = h.anatomy.mesh_volumes(5);
     
     
@@ -3856,7 +4614,7 @@ global h
 study_trials = str2num(h.edit_num_trials.String);
 study_srate = str2num(h.edit_srate.String);
 
-if h.monte_carlo_flag == 1 && h.menu_monte_synthetic_real_data.Value==4  % load Real Sensor Data in Monte-Carlo sims
+if h.monte_carlo_flag == 1 && h.menu_monte_synthetic_real_data.Value>=4  % load Real Sensor Data in Monte-Carlo sims
     [fpath,fname] = fileparts(h.monte_real_dsname);
     h.waitfor_txt.String = sprintf('Loading Real Sensor data from file: %s\n',fullfile(fpath,fname)); drawnow;
 else                                                                     % load Real Sensor Data in manual mode
@@ -3872,7 +4630,15 @@ update_anatomy_fields;
 %     x.data = sm_interpolate_data(x.data,bad_chans);
 % end
 
+%% data structure needs to be [chans x samples x trials];
+xidx = find(size(x.data) == length(x.lat));
+if xidx==1 % samples are in first index --> nee to shift dims
+    x.data = permute(x.data,[2 1 3]);
+elseif xidx==3
+    x.data = permute(x.data,[1 3 2]);
+end
 
+%%
 if x.srate > study_srate  % downsampling the data
     x.data = resample(double(x.data), study_srate , x.srate, 'Dimension',2);
     x.lat = resample(double(x.lat), study_srate , x.srate, 'Dimension',2);
@@ -3891,6 +4657,10 @@ if x.srate > study_srate  % downsampling the data
         x.lat = lat_sim;
     end
 else
+end
+
+if size(x.data,2)>length(h.cfg.study.lat_sim)
+    x.data = x.data(:,1:length(h.cfg.study.lat_sim),:);
 end
 
 %% randomly selecting number of trials
@@ -3940,11 +4710,14 @@ else
     w.Position(3:4)=[400 200]; htext = findobj(w, 'Type', 'Text'); htext.FontSize = 11; htext.HorizontalAlignment = 'left'; % setting fontsize to being readable
 end
 
-update_study_cfg();
+if ~isfield(h.sim_data,'cfg'); h.sim_data.cfg = h.cfg; end
+
+src.Tag=''; update_study_cfg(src,[]);
 
 if h.monte_carlo_flag ~= 1
     h.waitfor_panel.Visible='off'; h.waitfor_txt.String = sprintf('Default Message');
 end
+
 function sm_load_source_waves(varargin)
 % this program loads in source waveform data from a .mat file with the following variables:
 %
@@ -3999,6 +4772,10 @@ else
         nt = randperm(size(x.source_data,3));  % randomly selecting trials
         s_idx = 1:size(h.cfg.source.vx_locs,1) ; % selecting first sensors
         xsamps = 1:length(h.cfg.study.lat_sim);     % selecting first samples
+        if length(xsamps)>size(x.source_data,2)  % padding x.source_data with zeros
+            num_zeros = length(xsamps)-size(x.source_data,2);
+            x.source_data = cat(2,x.source_data, ones(size(x.source_data,1), num_zeros, size(x.source_data,3) )*1e-9);   % can't be exactly zero so using 1e-9
+        end
         fprintf('Source indices for source waveforms: '); fprintf('%.f ',s_idx); fprintf('\n');
         fprintf('Randomly selecting %.f of %.f trials\n',study_trials,size(x.source_data,3))
         h.sim_data.sig_final = permute(x.source_data(s_idx,xsamps,nt(1:study_trials)),[2 1 3]);
@@ -4008,6 +4785,12 @@ else
         h.sim_data.prepost_wav = h.sim_data.sig_wav;
         h.sim_data.prepost_win = h.sim_data.sig_wav;
         h.sim_data.source_waveform_type = 'Real Sources';
+        
+        %% overwriting sig_final_org waves
+        h.sim_data.sig_final_org = h.sim_data.sig_final;
+        %         h.sim_data,'sig_final_org'
+        
+        
     else
         s1 = sprintf('Some Data File parameters are NOT compatible with Study Parameters:\n\n                         Data File          Study Parameters\n');
         if x.srate~=study_srate; s2 = sprintf('Sample Rate    %.f       ~=      %s   (No)\n',x.srate,h.edit_srate.String);
@@ -4023,7 +4806,7 @@ else
         w.Position(3:4)=[400 200]; htext = findobj(w, 'Type', 'Text'); htext.FontSize = 11; htext.HorizontalAlignment = 'left'; % setting fontsize to being readable
     end
     % h.sim_data.sens_noise_scaled = h.sim_data.sens_noise./max(max(max(abs(h.sim_data.sens_noise)))); % scaled between -1 to 1
-    update_study_cfg();
+    src.Tag=''; update_study_cfg(src,[]);
 end
 
 if h.monte_carlo_flag ~= 1
@@ -4054,6 +4837,13 @@ end
 function menu_filt_type_Callback(varargin)
 global h
 
+if strcmp(varargin{1}.Style,'popupmenu')
+    if contains(varargin{1}.String{varargin{1}.Value},'fir')
+        h.edit_filt_order.String = 0;
+    end
+end
+
+
 if h.menu_filt_type.Value <=4 && str2num(h.edit_filt_order.String)==0 % FIR filter with no filter order
     h.menu_filt_method.String = {'equiripple'; 'kaiserwin'};
 elseif h.menu_filt_type.Value <=4 && str2num(h.edit_filt_order.String)~=0 % FIR filter with no filter order
@@ -4079,18 +4869,25 @@ h.btn_sim_sens_noise.Visible = 'off';
 h.panel_brain_noise.Visible = 'off';
 h.btn_get_real_noise_dataset.Visible = 'off';
 h.btn_fft_radnomize_phase.Visible = 'off';
+h.panel_synthetic_noise.Visible = 'off'; 
 
-if h.menu_noise_projection.Value==1 % Sensor Noise
+if h.menu_noise_projection.Value==1 % Synthetic Sensor Noise
     h.btn_sim_sens_noise.Visible = 'on';
     h.btn_fft_radnomize_phase.Visible = 'on';
-elseif h.menu_noise_projection.Value==2 % Brain Noise
+    h.panel_synthetic_noise.Visible = 'on'; 
+elseif h.menu_noise_projection.Value==2 % Synthetic Brain Sources Noise
     h.btn_sim_sens_noise.Visible = 'on';
     h.panel_brain_noise.Visible = 'on';
     h.btn_fft_radnomize_phase.Visible = 'on';
+    h.panel_synthetic_noise.Visible = 'on'; 
 elseif h.menu_noise_projection.Value==3 % Synthetic MVAR or GAN (Generative Adversarial Network) - machine learning <-- Not implemented yet
     % add in function in future updates
 elseif h.menu_noise_projection.Value==4 % Real Sensor
-    h.btn_get_real_noise_dataset.Visible = 'on';
+    h.btn_get_real_noise_dataset.Visible = 'on'; h.btn_get_real_noise_dataset.String = 'Load Real Noise';
+    h.btn_sim_sens_noise.Visible = 'off';
+    h.btn_fft_radnomize_phase.Visible = 'on';
+elseif h.menu_noise_projection.Value==5 % Real Sensor
+    h.btn_get_real_noise_dataset.Visible = 'on';  h.btn_get_real_noise_dataset.String = 'Load Real Resting';
     h.btn_sim_sens_noise.Visible = 'off';
     h.btn_fft_radnomize_phase.Visible = 'on';
 end
@@ -4112,31 +4909,156 @@ end
 
 if h.menu_noise_projection.Value == 1   % Simulate Sensor noise for all sensors
     %% NOTE: Simulating sensor noise is quite complicated because of spatial and temporal covariance needs to be modeled --> see reading in GUI directory: DeMunckEtAl_StatDip_KronPrud_IEEE_SP_2002_spatiotemporal_noise_covariance_simulation.pdf
-    % Currently not implementing covariance structure (see 'underconstruction code' below as a start).
-    h.sens_noise_cov_flag=0;
-    if h.sens_noise_cov_flag==0 % no shaping by spatial or temporal covariance
+    % Although not that accurate at representing "real" spatiotemporal noise - the following code attempts to do so.
+    % this gives at least a better approximation that uncorrelated gaussian noise that is often used in simulations.
+    if h.menu_synthetic_noise_cov_type.Value==1 % no shaping by spatial or temporal covariance
         h.sim_data.sens_noise = sim_noise_wav(h.cfg,size(h.anatomy.leadfield.H,1));
         h.sim_data.sens_noise_scaled = h.sim_data.sens_noise./max(max(max(abs(h.sim_data.sens_noise)))); % scaled between -1 to 1
         %         for t=randperm(h.cfg.study.num_trials); figure(3); clf; surf(cov(squeeze(h.sim_data.sens_noise_scaled(:,:,t(1))))); view(0,90); shading interp; axis tight; caxis([-.045 .045]); pause; end
-        %% NOT IMPLEMENTED simulating sensor noise with spatiotemporal covariance --> "spatio-temporal noise covariance is a Kronecker product of a spatial and a temporal covariance matrix"
-    elseif h.sens_noise_cov_flag==1     % Spatial Covariance shaping only
-        
+    elseif h.menu_synthetic_noise_cov_type.Value==2     % Spatial Covariance shaping only
+        h.edit_synthetic_noise_cov_exp_txt.Visible = 'on'; h.edit_synthetic_noise_cov_exp.Visible = 'on'; 
         noiseVec2 = sim_noise_wav(h.cfg,size(h.anatomy.leadfield.H,1));
-        
-        h.sensor_noise_cov_exp = (1/3.57^1.02);
-        
+        h.cfg.study.sensor_noise_cov_exp = str2num(h.edit_synthetic_noise_cov_exp.String);  %  see citation below
         %         noiseVec2 = noiseVec2/max(max(max(abs(noiseVec2))));
         noiseVec = permute(noiseVec2,[2 1 3]);
-        for t=1:size(noiseVec,3)     % randomizing covariance structure across trials
-            c_cov = random('exp',h.sensor_noise_cov_exp,size(noiseVec,1),size(noiseVec,1)); % spatial covariances 'exp' (1/3.57^1.02) not accounting for distance between channels so loosely based on Huizenga et al., 2002 IEEE TRANSACTIONS ON BIOMEDICAL ENGINEERING, VOL. 49, NO. 6, pp. 533:539; see Huizenga_2002_noise_cov_randomization_exp_values.pdf
-            noiseVec(:,:,t) = c_cov*squeeze(noiseVec(:,:,t));
-        end
+%         for xr = .01:.05:1 %(1/3.57^1.02);  %  see citation below
+%             h.cfg.study.sensor_noise_cov_exp = xr;
+            for t=1:size(noiseVec,3)     % randomizing covariance structure across trials
+                c_cov = random('exp',h.cfg.study.sensor_noise_cov_exp,size(noiseVec,1),size(noiseVec,1)); % spatial covariances 'exp' (1/3.57^1.02) not accounting for distance between channels so loosely based on Huizenga et al., 2002 IEEE TRANSACTIONS ON BIOMEDICAL ENGINEERING, VOL. 49, NO. 6, pp. 533:539; see Huizenga_2002_noise_cov_randomization_exp_values.pdf
+                noiseVec(:,:,t) = c_cov*squeeze(noiseVec(:,:,t));
+                r_cov(:,:,t) = c_cov; 
+            end
+%             surf(squeeze(nanmean(r_cov,3))); view(0,90); shading interp; axis tight; title(h.cfg.study.sensor_noise_cov_exp); caxis([-1 1]); colorbar;
+%             pause;
+%         end
         h.sim_data.sens_noise = permute(noiseVec,[2 1 3]);
         h.sim_data.sens_noise_scaled = h.sim_data.sens_noise./max(max(max(abs(h.sim_data.sens_noise)))); % scaled between -1 to 1
-        %         for t=randperm(h.cfg.study.num_trials); figure(3); clf; surf(cov(squeeze(h.sim_data.sens_noise_scaled(:,:,t(1))))); view(0,90); shading interp; axis tight; caxis([-55 55]); pause; end
-        %% NOT IMPLEMENTED simulating sensor noise with spatiotemporal covariance --> "spatio-temporal noise covariance is a Kronecker product of a spatial and a temporal covariance matrix"
-    elseif h.sens_noise_cov_flag==2     % Spatial and Temporal Covariance shaping <-- NOT IMPLEMENTED yet
+        %         for t=randperm(h.cfg.study.num_trials); figure(3); clf; surf(cov(squeeze(h.sim_data.sens_noise_scaled(:,:,t(1))))); view(0,90); shading interp; axis tight; caxis([-.045 .045]); pause; end
+
+        %% OLD "Temporal shaping using Covariance
+        % elseif h.menu_synthetic_noise_cov_type.Value==3     % Temporal Covariance shaping <-- NOT IMPLEMENTED yet
+        %        %% Better to add auto-correlation instead of temporal correlation because correlated time samples should be nearby to each other due to volume conduction <-- but then this would be spatiotemporal shaping.
+        %         noiseVec2 = sim_noise_wav(h.cfg,size(h.anatomy.leadfield.H,1));
+        % %         h.cfg.study.sensor_noise_cov_exp = (1/3.57^1.02);  %  see citation below
+        %         h.cfg.study.sensor_noise_cov_exp = str2num(h.edit_synthetic_noise_cov_exp.String);  %  see citation below
+        % %         for xr = .5:1:5 %(1/3.57^1.02);  %  see citation below
+        % %             h.cfg.study.sensor_noise_cov_exp = xr;
+        %             %         noiseVec = permute(noiseVec2,[2 1 3]);
+        %             for t=1:size(noiseVec2,3)     % randomizing covariance structure across trials
+        %                 c_cov = random('exp',h.cfg.study.sensor_noise_cov_exp,size(noiseVec2,1),size(noiseVec2,1)); % spatial covariances 'exp' (1/3.57^1.02) not accounting for distance between channels so loosely based on Huizenga et al., 2002 IEEE TRANSACTIONS ON BIOMEDICAL ENGINEERING, VOL. 49, NO. 6, pp. 533:539; see Huizenga_2002_noise_cov_randomization_exp_values.pdf
+        %                 noiseVec(:,:,t) = c_cov*squeeze(noiseVec2(:,:,t));
+        %             end
+        % %             surf(squeeze(c_cov)); view(0,90); shading interp; axis tight; title(h.cfg.study.sensor_noise_cov_exp);
+        % %             pause;
+        % %         end
+        %         noiseVec = permute(noiseVec,[2 1 3]);
+        %         h.sim_data.sens_noise = permute(noiseVec,[2 1 3]);
+        %         h.sim_data.sens_noise_scaled = h.sim_data.sens_noise./max(max(max(abs(h.sim_data.sens_noise)))); % scaled between -1 to 1
+        %         %         for t=randperm(h.cfg.study.num_trials); figure(3); clf; surf(cov(squeeze(h.sim_data.sens_noise_scaled(:,:,t(1))))); view(0,90); shading interp; axis tight; caxis([-.045 .045]); pause; end
+ 
+    elseif h.menu_synthetic_noise_cov_type.Value==3  || h.menu_synthetic_noise_cov_type.Value==4   % Temporal or Spatiotemporal shaping using ARM
+        %          msgbox('SpatioTemporal Covariance Shaping is Not implemented yet.','Coming Soon');
         
+        answ = questdlg(sprintf('Temporal & Spatiotemporal shaping of Noise using ARM can take several minutes depending on ARM order and # interactions?\n\nYou can reduce ARM order which speeds up computations but at a cost of modeling.\n\nDo you want to Continue?\n'),'Simulate Spatiotemporal Noise?','Yes','No','No');
+        
+        switch answ
+            case 'No'
+            case 'Yes'
+                
+                %% Implemented using ARM simulations but see --> "spatio-temporal noise covariance is a Kronecker product of a spatial and a temporal covariance matrix"
+                num_samps = h.cfg.study.num_samps;
+                num_chans = size(h.anatomy.leadfield.H,1);
+                num_trials = h.cfg.study.num_trials;
+                
+                if h.menu_synthetic_noise_cov_type.Value==3 % Only Temporally shaped
+                    num_interactions = 0;  % only one interaction among sensors thus no spatial correlations by design. There still could be some but these should be random.
+                    blk_trials = num_trials; % running blocks of trials so that ARM interactions aren't always among same electrodes for every trial.
+                    shape_type = 'Temporally';
+                elseif h.menu_synthetic_noise_cov_type.Value==4 % Spatiotemporally shaped
+                    shape_type = 'SpatioTemporally';
+                    num_interactions = str2num(h.edit_synthetic_noise_ARM_interaction.String);
+%                     num_blks = ceil(num_trials/num_interactions);
+                    num_blks = ceil(num_trials/10);
+                    blk_trials = ceil(num_trials/num_blks); % running blocks of trials so that ARM interactions aren't always among same electrodes for every trial.
+%                     blk_trials = num_trials; % running blocks of trials so that ARM interactions aren't always among same electrodes for every trial.
+                end
+                
+                ARM_order = str2num(h.edit_synthetic_noise_ARM_order.String);
+                noise_wav = [];
+%                 hm = msgbox(sprintf('Using ARM order = %.f to reduce modeling time for %.f sensors',ARM_order,num_chans),'');
+                hw = waitbar(0,sprintf('Creating %s-Shaped Noise',shape_type)); hw.Units = 'normalized'; hw.Position(2) = hw.Position(2)+.2;
+                %% adding noise
+                %                 for blk=1:num_blks
+                k=0;
+                while k==0  % running until neough trials within noise_wav after removing trials that may have ARM artefacts
+                    cfg = h.cfg;
+                    pad_samps = num_samps*10; % initial padded samples needed for ARM calculations - added as additional trials
+                    cfg.study.num_trials = blk_trials+10; % padding trials for passing samples because matrix is reshaped num_samps*num_trials
+                    % changing cfg based on noise params from Panel "Study Parameters" not from Panel "Generate Sensor Noise".
+                    freqs = str2num(h.edit_synthetic_noise_freqs.String);
+                    sig_freqs = repmat(freqs,[num_chans 1 1]); cfg.source.sig_freqs = permute(sig_freqs,[1 3 2]);
+                    cfg.study.synthetic_noise_flag = h.menu_synthetic_noise_flag.Value;
+                    cfg.study.synthetic_noise_freqs = str2num(h.edit_synthetic_noise_freqs.String);
+                    cfg.study.synthetic_pink_noise_slope = h.cfg.study.synthetic_pink_noise_slope;
+                    
+                    noiseVec2 = sim_noise_wav(cfg, num_chans);
+                    
+                    dims = size(noiseVec2);
+                    noiseVec2 = reshape(permute(noiseVec2,[2 1 3]),[dims(2) dims(1)*dims(3)]);
+                    [noiseVec2] = arm_generate_signal(num_chans, num_samps, ARM_order, num_interactions, pad_samps, noiseVec2);
+                    % removing trials that have > overall variance than the rest
+                    % will be removed;
+                    noiseVec2 = permute(reshape(noiseVec2,[num_chans, num_samps, blk_trials]),[2 1 3]);
+                    xvar = squeeze(var(var(noiseVec2))); good_trials = ~isoutlier(xvar);
+                    fprintf('%.f of %.f good trials\n',sum(good_trials),length(good_trials));
+                    noiseVec2 = noiseVec2(:,:,good_trials); 
+                    
+                    noise_wav = cat(3,noise_wav,noiseVec2);
+                    waitbar(size(noise_wav,3)/num_trials,hw, sprintf('Creating %s-Shaped Noise (%.f of %.f) Trials',shape_type,size(noise_wav,3),num_trials));
+                    if size(noise_wav,3)>num_trials; k=1; break; end
+
+                end
+                dims = size(noise_wav);
+                noise_wav = noise_wav(1:num_samps,1:num_chans,1:num_trials);
+               close (hw);
+                h.sim_data.sens_noise = noise_wav;
+                h.sim_data.sens_noise_scaled = h.sim_data.sens_noise./max(max(max(abs(h.sim_data.sens_noise)))); % scaled between -1 to 1
+%                 for t=1:size(h.sim_data.sens_noise_scaled,3); figure(3); clf;
+%                     subplot(1,3,1); plot(cfg.study.lat_sim, squeeze(h.sim_data.sens_noise_scaled(:,:,t(1))),'k'); title(sprintf('noise waves for trial %.f'),t)
+%                     subplot(1,3,2); surf(cov(squeeze(h.sim_data.sens_noise_scaled(:,:,t)))); view(0,90); shading interp; axis tight; caxis([-.045 .045]); title('Spatial (Sensor) Covariance');
+%                     subplot(1,3,3); surf(cov(squeeze(h.sim_data.sens_noise_scaled(:,:,t)'))); view(0,90); shading interp; axis tight; caxis([-.15 .15]); title('Temporal Covariance');
+%                     pause; 
+%                 end
+        end
+        
+    elseif h.menu_synthetic_noise_cov_type.Value==5     % Real Spatial Covariance shaping
+        [cov_file, fpath] = uigetfile('*.mat','Load Real Data for Covariance shaping');
+        load(fullfile(fpath,cov_file),'data'); % loading data from pre-created file with data struct = [chan x samps x trial];
+        
+        noiseVec2 = sim_noise_wav(h.cfg,size(h.anatomy.leadfield.H,1));
+        if size(data,1)<size(noiseVec2,2) || size(data,2)<size(noiseVec2,1) || size(data,3)<size(noiseVec2,3)
+            dims = size(data);
+            dims2 = size(noiseVec2);
+            txt = sprintf('Size of Loaded Data has insufficient data to simulate noise\nDimensions:\n   Data = [%.f chans x %.f samps x %.f trials]\n   Noise = [%.f chans x %.f samps x %.f trials]',dims,dims2([2 1 3]));
+            warndlg(txt); 
+            h.sim_data.sens_noise = [];
+            h.sim_data.sens_noise_scaled = [];
+        else
+            %         noiseVec2 = noiseVec2/max(max(max(abs(noiseVec2))));
+            noiseVec = permute(noiseVec2,[2 1 3]);
+            n_rand = randperm(size(data,3)); % randomly selecting data trials
+            fprintf('Randomly selected %.f trials from data with %.f trials\n',size(noiseVec2,3),size(data,3))
+            data = data(:,:,n_rand(1:size(noiseVec2,3))); 
+            for t=1:size(noiseVec,3)     % randomizing covariance structure across trials
+                %             c_cov = random('exp',h.cfg.study.sensor_noise_cov_exp,size(noiseVec,1),size(noiseVec,1)); % spatial covariances 'exp' (1/3.57^1.02) not accounting for distance between channels so loosely based on Huizenga et al., 2002 IEEE TRANSACTIONS ON BIOMEDICAL ENGINEERING, VOL. 49, NO. 6, pp. 533:539; see Huizenga_2002_noise_cov_randomization_exp_values.pdf
+                c_cov = cov(squeeze(data(1:length(h.anatomy.sens.good_sensors),h.cfg.study.base_samps,t))');
+                noiseVec(:,:,t) = c_cov*squeeze(noiseVec(:,:,t));
+                r_cov(:,:,t) = c_cov;
+            end
+            h.sim_data.sens_noise = permute(noiseVec,[2 1 3]);
+            h.sim_data.sens_noise_scaled = h.sim_data.sens_noise./max(max(max(abs(h.sim_data.sens_noise)))); % scaled between -1 to 1
+            %         for t=randperm(h.cfg.study.num_trials); figure(3); clf; surf(cov(squeeze(h.sim_data.sens_noise_scaled(:,:,t(1))))); view(0,90); shading interp; axis tight; caxis([-.00045 .00045]); pause; end
+        end
     end
     
     
@@ -4193,7 +5115,7 @@ function sim_brain_noise_wav
 global h
 num_chans = str2num(h.edit_num_noise_sources.String);
 % broadband noise
-h.cfg.study.noise_flag = h.edit_noise_flag.Value;    % 1=Broadband, 2=NarrowBand, 3=Notched Band, 4=Pink
+h.cfg.study.noise_flag = h.menu_synthetic_noise_flag.Value;    % 1=Broadband, 2=NarrowBand, 3=Notched Band, 4=Pink
 h.sim_data.brain_noise = sim_noise_wav(h.cfg,num_chans);
 h.sim_data.brain_noise = h.sim_data.brain_noise/max(max(max(abs(h.sim_data.brain_noise))));
 % figure(1); clf; plot(h.cfg.study.lat_sim,squeeze(h.sim_data.brain_noise(:,:,1))); figure(2); clf; calc_fft(squeeze(h.sim_data.brain_noise(:,:,1)),h.cfg.study.srate,1,'k');
@@ -4209,25 +5131,43 @@ h.cfg.source.brain_noise_idx = zeros(num_noise,h.cfg.study.num_trials);
 h.cfg.source.brain_noise_amp = h.cfg.source.brain_noise_idx;
 h.cfg.source.brain_noise_ori=ones(num_noise,3,h.cfg.study.num_trials);
 
-rn = randperm(length(brn_vx)); % same locs across trials
-%     az = deg2rad(normrnd(0,180,num_noise,1));
-%     el = deg2rad(normrnd(0,180,num_noise,1));
-for t=1:h.cfg.study.num_trials % new set of brain noise sources each trial
-    % random locs across trials
-    %      rn = randperm(length(brn_vx));
-    h.cfg.source.brain_noise_idx(:,t) = brn_vx(rn(1:num_noise)); % brain noise voxel locations
-    h.cfg.source.brain_noise_amp(:,t) = abs(normrnd(noise_amp(1),noise_amp(2),num_noise,1));  % randomly sampling ampltidues for noise sources from a mean = 20 nA and stdev = 10 <-- This si completely arbitirary right now.
-    
-    % random noise orientations
-    if h.menu_ori_normal.Value==1  % Volume
+if h.cfg.source.radio_brain_noise_locs_stable_flag.Value == 1
+    rn = randperm(length(brn_vx)); % same locs across trials
         az = deg2rad(normrnd(0,180,num_noise,1));
         el = deg2rad(normrnd(0,180,num_noise,1));
-        [x,y,z]=sph2cart(az,el,ones(size(az)));
-        h.cfg.source.brain_noise_ori(:,:,t) = [x,y,z];
-    elseif h.menu_ori_normal.Value==2  % Cortically Constrained
-        h.cfg.source.brain_noise_ori(:,:,t) = h.anatomy.leadfield_eeg_cortex.ori(h.cfg.source.brain_noise_idx(:,t),:);
+%     randomization is outside of trials loop
+    for t=1:h.cfg.study.num_trials % new set of brain noise sources each trial
+        h.cfg.source.brain_noise_idx(:,t) = brn_vx(rn(1:num_noise)); % brain noise voxel locations
+        h.cfg.source.brain_noise_amp(:,t) = abs(normrnd(noise_amp(1),noise_amp(2),num_noise,1));  % randomly sampling ampltidues for noise sources from a mean = 20 nA and stdev = 10 <-- This si completely arbitirary right now.
+        
+        % random noise orientations
+        if h.menu_ori_normal.Value==1  % Volume
+            [x,y,z]=sph2cart(az,el,ones(size(az)));
+            h.cfg.source.brain_noise_ori(:,:,t) = [x,y,z];
+        elseif h.menu_ori_normal.Value==2  % Cortically Constrained
+            %         h.cfg.source.brain_noise_ori(:,:,t) = h.anatomy.leadfield_eeg_cortex(h.menu_sens_montage.Value).ori(h.cfg.source.brain_noise_idx(:,t),:);
+            h.cfg.source.brain_noise_ori(:,:,t) = h.anatomy.leadfield.ori(h.cfg.source.brain_noise_idx(:,t),:);
+        end
     end
     
+else
+    for t=1:h.cfg.study.num_trials % new set of brain noise sources each trial
+        % random locs across trials
+        rn = randperm(length(brn_vx));
+        h.cfg.source.brain_noise_idx(:,t) = brn_vx(rn(1:num_noise)); % brain noise voxel locations
+        h.cfg.source.brain_noise_amp(:,t) = abs(normrnd(noise_amp(1),noise_amp(2),num_noise,1));  % randomly sampling ampltidues for noise sources from a mean = 20 nA and stdev = 10 <-- This si completely arbitirary right now.
+        
+        % random noise orientations
+        if h.menu_ori_normal.Value==1  % Volume
+            az = deg2rad(normrnd(0,180,num_noise,1));
+            el = deg2rad(normrnd(0,180,num_noise,1));
+            [x,y,z]=sph2cart(az,el,ones(size(az)));
+            h.cfg.source.brain_noise_ori(:,:,t) = [x,y,z];
+        elseif h.menu_ori_normal.Value==2  % Cortically Constrained
+            %         h.cfg.source.brain_noise_ori(:,:,t) = h.anatomy.leadfield_eeg_cortex(h.menu_sens_montage.Value).ori(h.cfg.source.brain_noise_idx(:,t),:);
+            h.cfg.source.brain_noise_ori(:,:,t) = h.anatomy.leadfield.ori(h.cfg.source.brain_noise_idx(:,t),:);
+        end
+    end
     
     
     
@@ -4244,12 +5184,12 @@ msgbox('Not Implemented Yet');
 %% plot noise locations on Anatomy
 function btn_plot_noise_locs(varargin)
 global h
-% plot_3D_mri('off'); % reploting anatomy + sources without scalp
+plot_3D_mri('off'); % reploting anatomy + sources without scalp
 scatter3(h.axes_anatomy,h.anatomy.leadfield.voxel_pos(h.cfg.source.brain_noise_idx,1),h.anatomy.leadfield.voxel_pos(h.cfg.source.brain_noise_idx,2),h.anatomy.leadfield.voxel_pos(h.cfg.source.brain_noise_idx,3),'k.');
 function menu_head_model_CallBack(varargin)
 global h
 
-h.listbox_chans.Value = 1; % resetting when swithcing between MEG and EEG sensors beccause of different # sensors
+h.listbox_chans.Value = 1; % resetting when switching between MEG and EEG sensors beccause of different # sensors
 
 if h.menu_ori_normal.Value == 2 && h.menu_head_model.Value == 1
     h.menu_ori_normal.Value = 1; % Volume Headmodel can only have random orientations
@@ -4260,25 +5200,25 @@ menu_sens_type_CallBack();
 
 if h.menu_head_model.Value == 1     % Volume
     if h.menu_sens_type.Value == 1 && ~isempty(h.anatomy.leadfield_meg_vol) && ~isempty(h.anatomy.headmodel_meg_vol)  % MEG
-        h.anatomy.leadfield = h.anatomy.leadfield_meg_vol;
-        h.anatomy.headmodel = h.anatomy.headmodel_meg_vol;
+        h.anatomy.leadfield = h.anatomy.leadfield_meg_vol(h.menu_sens_montage.Value);
+        h.anatomy.headmodel = h.anatomy.headmodel_meg_vol(h.menu_sens_montage.Value);
     elseif h.menu_sens_type.Value == 2 && ~isempty(h.anatomy.leadfield_eeg_vol) && ~isempty(h.anatomy.headmodel_eeg_vol) % EEG
-        h.anatomy.leadfield = h.anatomy.leadfield_eeg_vol;
-        h.anatomy.headmodel = h.anatomy.headmodel_eeg_vol;
+        h.anatomy.leadfield = h.anatomy.leadfield_eeg_vol(h.menu_sens_montage.Value);
+        h.anatomy.headmodel = h.anatomy.headmodel_eeg_vol(h.menu_sens_montage.Value);
     elseif h.menu_sens_type.Value == 3  % M/EEG
         h.anatomy.leadfield = [];  % will need to change this in the future for adding M/EEG
         h.anatomy.headmodel = [];
     end
     %     h.menu_ori_normal.Enable = 'inactive';  h.menu_ori_normal.ForegroundColor=[1 1 1]*0.5;   h.menu_ori_normal.Value = 1;    % Random orientations locked
-elseif h.menu_head_model.Value == 2 && ...
+elseif h.menu_head_model.Value == 2 && ...  % Cortex
         ( ~isempty(h.anatomy.leadfield_meg_cortex) && ~isempty(h.anatomy.headmodel_meg_cortex) || ... % Cortical Surface
         ~isempty(h.anatomy.leadfield_eeg_cortex) && ~isempty(h.anatomy.headmodel_eeg_cortex) )
     if h.menu_sens_type.Value == 1  % MEG
-        h.anatomy.leadfield = h.anatomy.leadfield_meg_cortex;
-        h.anatomy.headmodel = h.anatomy.headmodel_meg_cortex;
+        h.anatomy.leadfield = h.anatomy.leadfield_meg_cortex(h.menu_sens_montage.Value);
+        h.anatomy.headmodel = h.anatomy.headmodel_meg_cortex(h.menu_sens_montage.Value);
     elseif h.menu_sens_type.Value == 2  % EEG
-        h.anatomy.leadfield = h.anatomy.leadfield_eeg_cortex;
-        h.anatomy.headmodel = h.anatomy.headmodel_eeg_cortex;
+        h.anatomy.leadfield = h.anatomy.leadfield_eeg_cortex(h.menu_sens_montage.Value);
+        h.anatomy.headmodel = h.anatomy.headmodel_eeg_cortex(h.menu_sens_montage.Value);
         
     elseif h.menu_sens_type.Value == 3  % M/EEG
         h.anatomy.leadfield = [];  % will need to change this in the future for adding M/EEG
@@ -4288,6 +5228,22 @@ elseif h.menu_head_model.Value == 2 && ...
         h.anatomy.leadfield.ori = normals(h.anatomy.leadfield.voxel_pos, h.anatomy.mesh_volumes(4).tri);
     end
     %     h.menu_ori_normal.Enable = 'inactive';  h.menu_ori_normal.ForegroundColor=[1 1 1]*.5; h.menu_ori_normal.Value = 2;    % Random orientations locked
+elseif h.menu_head_model.Value == 3 && ... % Spheres(Volume)
+        ( ~isempty(h.anatomy.leadfield_eeg_spheres_vol) && ~isempty(h.anatomy.headmodel_eeg_spheres_vol) ) % Cortical Surface
+    h.anatomy.leadfield = h.anatomy.leadfield_eeg_spheres_vol(h.menu_sens_montage.Value);
+    h.anatomy.headmodel = h.anatomy.headmodel_eeg_spheres_vol(h.menu_sens_montage.Value);
+    if ~isfield(h.anatomy.leadfield,'H')
+        x = [h.anatomy.leadfield.leadfield{:}]; h.anatomy.leadfield.H = reshape(x,size(x,1), 3, size(x,2)/3);
+        h.anatomy.leadfield.voxel_pos = h.anatomy.leadfield.pos;
+    end
+elseif h.menu_head_model.Value == 4 && ... % Spheres(Cortex)
+        ( ~isempty(h.anatomy.leadfield_eeg_spheres_cortex) && ~isempty(h.anatomy.headmodel_eeg_spheres_cortex) ) % Cortical Surface
+    h.anatomy.leadfield = h.anatomy.leadfield_eeg_spheres_cortex(h.menu_sens_montage.Value);
+    h.anatomy.headmodel = h.anatomy.headmodel_eeg_spheres_cortex(h.menu_sens_montage.Value);
+    if ~isfield(h.anatomy.leadfield,'H')
+        x = [h.anatomy.leadfield.leadfield{:}]; h.anatomy.leadfield.H = reshape(x,size(x,1), 3, size(x,2)/3);
+        h.anatomy.leadfield.voxel_pos = h.anatomy.leadfield.pos;
+    end
 end
 menu_sens_type_CallBack();
 try h.leadfield_txt.String = sprintf('%.f sensors x  %.f orientations x %.f dipoles',size(h.anatomy.leadfield.H)); catch; h.leadfield_txt.String = sprintf('No Lead Fields'); end
@@ -4300,59 +5256,98 @@ else
     w.Position(3)=350; htext = findobj(w, 'Type', 'Text'); htext.FontSize = h.font_size_warndlg; htext.HorizontalAlignment = 'left';
     if h.menu_sens_type.Value==1    % MEG
         h.listbox_chans.String = h.anatomy.sens_meg.label; h.listbox_chans.Value=1;
-    elseif h.menu_sens_type.Value==2    % EEG
+         h.btn_reref_EEG.Visible = 'off';
+   elseif h.menu_sens_type.Value==2    % EEG
         h.listbox_chans.String = h.anatomy.sens_eeg.label; h.listbox_chans.Value=1;
+        h.btn_reref_EEG.Visible = 'on';
     end
 end
 
+sm_change_sensors('');
+
+
 edit_source_CallBack;
 update_anatomy_fields;
+function menu_sens_montage_CallBack(varargin)
+global h
+h.listbox_chans.Value = 1;
+menu_sens_type_CallBack(); % forwarding to another call
+plot_3D_mri;
 function menu_sens_type_CallBack(varargin)
 global h
-if h.menu_sens_type.Value == 1
-    if ~isempty(h.anatomy.leadfield)    % MEG
-        h.sensors_txt.String = sprintf('%.f sensors (%s) with %.f used for leadfield',size(h.anatomy.sens_meg.chanpos,1),h.anatomy.sens_meg.type,size(h.anatomy.leadfield.H,1));
+
+
+
+if h.menu_sens_type.Value == 1  % MEG
+if h.menu_sens_montage.Value > length(h.anatomy.leadfield_meg_vol) ; h.menu_sens_montage.Value = 1; end
+    
+    switch h.menu_head_model.String{h.menu_head_model.Value}
+        case 'Volume'
+            h.anatomy.leadfield = h.anatomy.leadfield_meg_vol(h.menu_sens_montage.Value);
+            h.anatomy.headmodel = h.anatomy.headmodel_meg_vol(h.menu_sens_montage.Value);
+        case 'Cortical Surface'
+            h.anatomy.leadfield = h.anatomy.leadfield_meg_cortex(h.menu_sens_montage.Value);
+            h.anatomy.headmodel = h.anatomy.headmodel_meg_cortex(h.menu_sens_montage.Value);
+    end
+    
+    if ~isempty(h.anatomy.leadfield)
+        h.sensors_txt.String = sprintf('%.f sensors (%s) with %.f used for leadfield',size(h.anatomy.sens_meg(h.menu_sens_montage.Value).chanpos,1),h.anatomy.sens_meg(h.menu_sens_montage.Value).type,size(h.anatomy.leadfield.H,1));
         h.edit_leadfield_gain.String = '1e6';
-        % find sensor labels of Leadfields that were used from sens_eeg
+        % find sensor labels of Leadfields that were used from sens_meg
         cfg.sens_idx=[];
-        for v=1:length(h.anatomy.sens_meg.label)
-            if sum(strcmp(h.anatomy.sens_meg.label(v),h.anatomy.leadfield.label))==1
+        for v=1:length(h.anatomy.sens_meg(h.menu_sens_montage.Value).label)
+            if sum(strcmp(h.anatomy.sens_meg(h.menu_sens_montage.Value).label(v),h.anatomy.leadfield.label))==1
                 cfg.sens_idx = [cfg.sens_idx v];
             end
         end
     else
-        cfg.sens_idx = find ( startsWith(h.anatomy.sens_meg.label,'M')==1) ;
-        h.sensors_txt.String = sprintf('%.f sensors (%s) -- No Lead Field',size(h.anatomy.sens_meg.chanpos,1),h.anatomy.sens_meg.type);
+        cfg.sens_idx = find ( startsWith(h.anatomy.sens_meg(h.menu_sens_montage.Value).label,'M')==1) ;
+        h.sensors_txt.String = sprintf('%.f sensors (%s) -- No Lead Field',size(h.anatomy.sens_meg(h.menu_sens_montage.Value).chanpos,1),h.anatomy.sens_meg(h.menu_sens_montage.Value).type);
     end
     h.edit_yscale.String = '-500 500'; h.edit_yscale_txt.String = 'Y Scale (fT)';
-    cfg.sens_type = 'meg'; h.anatomy.sens = bs_select_meeg_sensors(cfg,h.anatomy.sens_meg);    % selecting only channels used in Leadfields for forward projecting data
+    cfg.sens_type = 'meg'; h.anatomy.sens = bs_select_meeg_sensors(cfg,h.anatomy.sens_meg(h.menu_sens_montage.Value));    % selecting only channels used in Leadfields for forward projecting data
     h.listbox_chans.String = h.anatomy.sens.label;
     h.listbox_chans.ForegroundColor = h.sens_clr;
+    
 elseif h.menu_sens_type.Value == 2     % EEG
-    if ~isempty(h.anatomy.leadfield)   % MEG
-        h.sensors_txt.String = sprintf('%.f sensors (%s) with %.f used for leadfield',size(h.anatomy.sens_eeg.chanpos,1),h.anatomy.sens_eeg.type,size(h.anatomy.leadfield.H,1));
+ if h.menu_sens_montage.Value > length(h.anatomy.leadfield_eeg_vol) ; h.menu_sens_montage.Value = 1; end
+   
+    switch h.menu_head_model.String{h.menu_head_model.Value}
+        case 'Volume'
+            h.anatomy.leadfield = h.anatomy.leadfield_eeg_vol(h.menu_sens_montage.Value);
+            h.anatomy.headmodel = h.anatomy.headmodel_eeg_vol(h.menu_sens_montage.Value);
+        case 'Cortical Surface'
+            h.anatomy.leadfield = h.anatomy.leadfield_eeg_cortex(h.menu_sens_montage.Value);
+            h.anatomy.headmodel = h.anatomy.headmodel_eeg_cortex(h.menu_sens_montage.Value);
+    end
+    
+    if ~isempty(h.anatomy.leadfield)
+        h.sensors_txt.String = sprintf('%.f sensors (%s) with %.f used for leadfield',size(h.anatomy.sens_eeg(h.menu_sens_montage.Value).chanpos,1),h.anatomy.sens_eeg(h.menu_sens_montage.Value).type,size(h.anatomy.leadfield.H,1));
         h.edit_yscale.String = '-100 100'; h.edit_yscale_txt.String = ['Y Scale (' char(181) 'V):'];
         
         % find sensor labels of Leadfields that were used from sens_eeg
         cfg.sens_idx=[];
-        for v=1:length(h.anatomy.sens_eeg.label)
-            if sum(strcmp(h.anatomy.sens_eeg.label(v),h.anatomy.leadfield.label))==1
+        for v=1:length(h.anatomy.sens_eeg(h.menu_sens_montage.Value).label)
+            if sum(strcmp(h.anatomy.sens_eeg(h.menu_sens_montage.Value).label(v),h.anatomy.leadfield.label))==1
                 cfg.sens_idx = [cfg.sens_idx v];
             end
         end
     else
-        cfg.sens_idx = find( strcmpi(h.anatomy.sens_eeg.chantype,'eeg')==1 );
-        h.sensors_txt.String = sprintf('%.f sensors (%s) -- No Lead Field',size(h.anatomy.sens_eeg.chanpos,1),h.anatomy.sens_eeg.type);
+        cfg.sens_idx = find( strcmpi(h.anatomy.sens_eeg(h.menu_sens_montage.Value).chantype,'eeg')==1 );
+        h.sensors_txt.String = sprintf('%.f sensors (%s) -- No Lead Field',size(h.anatomy.sens_eeg(h.menu_sens_montage.Value).chanpos,1),h.anatomy.sens_eeg(h.menu_sens_montage.Value).type);
     end
     
-    h.edit_leadfield_gain.String = '1e-2';
-    cfg.sens_type = 'eeg'; h.anatomy.sens = bs_select_meeg_sensors(cfg,h.anatomy.sens_eeg);    % selecting only channels used in Leadfields for forward projecting data
+    h.edit_leadfield_gain.String = '1e-3'; % conversion to microV
+    cfg.sens_type = 'eeg'; h.anatomy.sens = bs_select_meeg_sensors(cfg,h.anatomy.sens_eeg(h.menu_sens_montage.Value));    % selecting only channels used in Leadfields for forward projecting data
     h.listbox_chans.String = h.anatomy.sens.label;
     h.listbox_chans.ForegroundColor = h.chan_clr;
+    
 elseif h.menu_sens_type.Value == 3      % MEEG  = combined MEG and EEG
     h.anatomy.sens = [];
 end
-update_scale_texts();
+
+% sm_calc_leadfield_scaling_factor(); % calculating leadfield scale factor based on those calculated from exported BESA lead fields
+update_scale_texts(); update_anatomy_fields;
 function menu_ori_normal_CallBack(varargin)
 global h
 if h.menu_ori_normal.Value == 1 && (h.menu_head_model.Value == 1 || h.menu_head_model.Value == 2 ) % Random
@@ -4372,16 +5367,44 @@ update_source_data([],[]); plot_3D_mri('on');
 function plot_3D_mri(varargin)
 global h
 try
-    src.Tag = ''; update_cfg(src,[]); % updating cfg based on targets set on screen tab's for ERP, PLV, PLI
+update_cfg(); % updating cfg based on targets set on screen tab's for ERP, PLV, PLI
 catch me
 end
-update_source_cfg;
+
+switch h.menu_ARM_add.String{h.menu_ARM_add.Value}
+    case 'Synthetic Only'
+        update_source_cfg; update_source_data;
+        if ~isfield(h.cfg.source,'src_clr'); h.cfg.source.src_clr = h.src_clr; end
+        opt.source_clr=h.cfg.source.src_clr;
+    case 'ARM only'
+        h.cfg.source.vx_idx = h.cfg.ARM_params.vx_idx;
+        h.cfg.source.vx_amp = h.cfg.ARM_params.vx_amp;
+        h.cfg.source.vx_locs = h.cfg.ARM_params.vx_locs;
+        h.cfg.source.vx_ori = h.cfg.ARM_params.vx_ori;
+        h.cfg.source.sig_amp_perc = h.cfg.ARM_params.sig_amp_perc;
+        h.sim_data.source_waveform_type = 'ARM Source Signals Only';
+        opt.source_clr = lines(length(h.cfg.source.vx_idx));
+    case 'Add Waveforms'
+        update_source_cfg; update_source_data;
+        opt.source_clr=h.src_clr;
+    case 'Concatenate Sources'
+        update_source_cfg; update_source_data;
+        h.cfg.source.vx_idx = cat(2,h.cfg.source.vx_idx,h.cfg.ARM_params.vx_idx);
+        h.cfg.source.vx_amp = cat(2,h.cfg.source.vx_amp,h.cfg.ARM_params.vx_amp);
+        h.cfg.source.vx_locs = cat(1,h.cfg.source.vx_locs,h.cfg.ARM_params.vx_locs);
+        h.cfg.source.vx_ori = cat(1,h.cfg.source.vx_ori,h.cfg.ARM_params.vx_ori);
+        opt.source_clr = lines(length(h.cfg.source.vx_idx));
+        opt.source_clr(1:3,:) = h.src_clr;
+end
+h.cfg.source.src_clr = opt.source_clr;
+
 % h.axes_anatomy.clo;
 % h.axes_anatomy.reset;
-h.axes_anatomy.NextPlot = 'add'; axes(h.axes_anatomy); axis tight; 
+h.axes_anatomy.NextPlot = 'add'; 
+axes(h.axes_anatomy); 
+axis(h.axes_anatomy, 'tight');
 if ~isempty(h.anatomy.mesh_volumes)
     opt.axes_h=h.axes_anatomy;
-    opt.source_clr=h.src_clr;
     opt.vol_nums=1:length(h.anatomy.mesh_volumes);
     
     if length(h.anatomy.mesh_volumes)>=4 && h.menu_head_model.Value==2
@@ -4407,26 +5430,30 @@ if ~isempty(h.anatomy.mesh_volumes)
         opt.vol_nums=1;  h.scalp_plot_patch = bl_plot_mesh(vol,opt);
         vol = h.anatomy.mesh_volumes(1);
     end
+  
     
     if h.menu_sens_type.Value == 1      %MEG
-        ft_plot_sens(h.anatomy.sens_meg,'label','on','coilshape','circle','coilsize',12,'fontsize',8,'fontcolor',h.sens_clr,'facecolor',h.sens_clr,'facealpha',0,'edgecolor',h.sens_clr,'chantype', h.anatomy.sens_meg.chantype{1});
+%         ft_plot_sens(h.anatomy.sens_meg,'label','on','coilshape','circle','coilsize',12,'fontsize',8,'fontcolor',h.sens_clr,'facecolor',h.sens_clr,'facealpha',0,'edgecolor',h.sens_clr,'chantype', h.anatomy.sens_meg.chantype{1});
+        ft_plot_sens(h.anatomy.sens,'label','on','coilshape','circle','coilsize',12,'fontsize',8,'fontcolor',h.sens_clr,'facecolor',h.sens_clr,'facealpha',0,'edgecolor',h.sens_clr,'chantype', h.anatomy.sens.chantype{1});
     elseif h.menu_sens_type.Value == 2      %EEG
-        ft_plot_sens(h.anatomy.sens_eeg,'label','on','elecshape','circle','elecsize',8,'fontsize',8,'fontcolor',h.chan_clr,'facecolor',h.chan_clr,'facealpha',0,'edgecolor',h.chan_clr,'chantype', h.anatomy.sens_eeg.chantype{1});
+%         ft_plot_sens(h.anatomy.sens_eeg,'label','on','elecshape','circle','elecsize',8,'fontsize',8,'fontcolor',h.chan_clr,'facecolor',h.chan_clr,'facealpha',0,'edgecolor',h.chan_clr,'chantype', h.anatomy.sens_eeg.chantype{1});
+        ft_plot_sens(h.anatomy.sens,'label','on','elecshape','circle','elecsize',8,'fontsize',8,'fontcolor',h.chan_clr,'facecolor',h.chan_clr,'facealpha',0,'edgecolor',h.chan_clr,'chantype', h.anatomy.sens.chantype{1});
     elseif h.menu_sens_type.Value == 3      %MEEG
-        ft_plot_sens(h.anatomy.sens_meg,'label','on','coilshape','circle','coilsize',12,'fontsize',8,'fontcolor',h.sens_clr,'facecolor',h.sens_clr,'facealpha',0,'edgecolor',h.sens_clr,'chantype', h.anatomy.sens_meg.chantype{1});
-        ft_plot_sens(h.anatomy.sens_eeg,'label','on','elecshape','circle','elecsize',8,'fontsize',8,'fontcolor',h.chan_clr,'facecolor',h.chan_clr,'facealpha',0,'edgecolor',h.chan_clr,'chantype', h.anatomy.sens_eeg.chantype{1});
+        ft_plot_sens(h.anatomy.sens_meg(h.menu_sens_montage.Value),'label','on','coilshape','circle','coilsize',12,'fontsize',8,'fontcolor',h.sens_clr,'facecolor',h.sens_clr,'facealpha',0,'edgecolor',h.sens_clr,'chantype', h.anatomy.sens_meg(h.menu_sens_montage.Value).chantype{1});
+        ft_plot_sens(h.anatomy.sens_eeg(h.menu_sens_montage.Value),'label','on','elecshape','circle','elecsize',8,'fontsize',8,'fontcolor',h.chan_clr,'facecolor',h.chan_clr,'facealpha',0,'edgecolor',h.chan_clr,'chantype', h.anatomy.sens_eeg(h.menu_sens_montage.Value).chantype{1});
     end
     
     
     %     legend({'Source 1' 'Source 2' 'Source 3'},'Location','northwest'); axis tight;
     % plotting orientations
     try
-        for v=1:3
-            amp_gain = (max(max(abs([h.cfg.source.sig_amp_perc(v,:),h.cfg.source.prepost_amp_perc(v,:)])))/100)*str2num(h.edit_source_amp(v).String)/2;
+        for v=1:size(h.cfg.source.vx_locs,1)
+%             amp_gain = (max(max(abs([h.cfg.source.sig_amp_perc(v,:),h.cfg.source.prepost_amp_perc(v,:)])))/100)*str2num(h.edit_source_amp(v).String)/2;
+            amp_gain = h.cfg.source.vx_amp(v)*.75;
             plot3(h.axes_anatomy, [h.cfg.source.vx_locs(v,1) h.cfg.source.vx_locs(v,1)+(h.cfg.source.vx_ori(v,1)*amp_gain) ],...
                 [h.cfg.source.vx_locs(v,2) h.cfg.source.vx_locs(v,2)+(h.cfg.source.vx_ori(v,2)*amp_gain) ],...
                 [h.cfg.source.vx_locs(v,3) h.cfg.source.vx_locs(v,3)+(h.cfg.source.vx_ori(v,3)*amp_gain) ],...
-                'Color',h.src_clr(v,:),'linewidth',2)
+                'Color',h.cfg.source.src_clr(v,:),'linewidth',2)
         end
     catch
         if h.start_flag == 0
@@ -4451,13 +5478,15 @@ try
         set(findobj(h.axes_anatomy.Children,'Type','Text'),'visible','off')
     end
     
-    if h.toggle_sens_OnOff.Value == 1   % labels On
+    if h.toggle_sens_OnOff.Value == 1   % Sensors On
         h.toggle_sens_OnOff.ForegroundColor = [0 .6 0];    h.toggle_sens_OnOff.String = 'Sensors On';
         h.sens_plot_patch.Visible = 'on';
+        if isfield(h,'sens_selected_scatter'); h.sens_selected_scatter.Visible = 'on'; end
     elseif h.toggle_sens_OnOff.Value == 0   % labels Off
         h.toggle_sens_OnOff.ForegroundColor = [1 0 0];    h.toggle_sens_OnOff.String = 'Sensors Off';
         h.sens_plot_patch.Visible = 'off';
-    end
+         if isfield(h,'sens_selected_scatter'); h.sens_selected_scatter.Visible = 'off'; end
+   end
 catch
 end
 function update_source_data(varargin)
@@ -4505,20 +5534,70 @@ end
 function update_monte_carlo(varargin)
 global h
 
-if h.menu_monte_synthetic_real_data.Value >= 2  % Real Sensor Data
-    if exist(h.real_datadir_txt.String,'dir')
-        xdir = dir(fullfile(h.real_datadir_txt.String,'*.mat'));
-        h.monte_real_sensor_files = {xdir.name};
-    else
-        h.monte_real_sensor_files = [];
-    end
-    h.edit_monte_num_sims.String = length(h.monte_real_sensor_files);
-end
+% Creating dummy variable monte_params.h that mimics "h" with properties of 'String" 'Value" so that they can be called in using sm_batch scripts 
+keep_props = {'String' 'Value'};
+h.monte_params.h = sm_create_h_properties(h,keep_props);
+ 
+update_cfg; 
 
-%% initializing variables
 h.cfg.study.study_name = h.edit_study_name.String;
 
-% Checking that sensors exist
+%% "Monte Carlo" Panel Variables
+h.monte_params.num_sims = str2num(h.edit_monte_num_sims.String);    
+h.monte_params.num_reruns = str2num(h.edit_monte_num_reruns.String);    
+h.monte_params.start_num = str2num(h.edit_monte_run_num.String);    
+
+
+%% "Study & Source PLV/PLI" Panel Variables
+h.monte_params.SNR_range = str2num(h.edit_monte_SNR_range.String); h.monte_params.SNR_StdDev = str2num(h.edit_monte_SNR_StdDev.String);
+h.monte_params.num_trials = str2num(h.edit_monte_num_trials.String); h.monte_params.num_trials_StdDev = str2num(h.edit_monte_num_trials_StdDev.String);
+h.monte_params.plv_range = str2num(h.edit_monte_plv_range.String); h.monte_params.plv_StdDev = str2num(h.edit_monte_plv_StdDev.String);
+
+%% "Simulate M/EEG Parameters" Panel Variables
+
+try
+    h.monte_params.source_amp_range=[];
+    h.monte_params.source_loc_range_X=[];  h.monte_params.source_loc_range_Y=[];  h.monte_params.source_loc_range_Z=[];
+    h.monte_params.source_ori_range_Az=[]; h.monte_params.source_ori_range_El=[];
+    for v=1:length(h.cfg.source.vx_idx)
+        %% Amp
+        h.monte_params.source_amp_range(v,:) = str2num(h.edit_monte_source_amp_range(v).String);
+        %% Loc
+        h.monte_params.source_loc_range_X(v,:) = str2num(h.edit_monte_source_loc_range_X(v).String);
+        h.monte_params.source_loc_range_Y(v,:) = str2num(h.edit_monte_source_loc_range_Y(v).String);
+        h.monte_params.source_loc_range_Z(v,:) = str2num(h.edit_monte_source_loc_range_Z(v).String);
+        %% Ori
+        h.monte_params.source_ori_range_Az(v,:) = str2num(h.edit_monte_source_ori_range_Az(v).String);
+        h.monte_params.source_ori_range_El(v,:) = str2num(h.edit_monte_source_ori_range_El(v).String);
+        
+    end
+    %% Std Devs
+    % Amp
+    h.monte_params.source_amp_StdDev = str2num(h.edit_monte_source_amp_StdDev.String);
+    % Locs
+    h.monte_params.source_loc_StdDev_X = str2num(h.edit_monte_source_loc_StdDev_X.String);
+    h.monte_params.source_loc_StdDev_Y = str2num(h.edit_monte_source_loc_StdDev_Y.String);
+    h.monte_params.source_loc_StdDev_Z = str2num(h.edit_monte_source_loc_StdDev_Z.String);
+    % Ori
+    h.monte_params.source_ori_StdDev_Az = str2num(h.edit_monte_source_ori_StdDev_Az.String);
+    h.monte_params.source_ori_StdDev_El = str2num(h.edit_monte_source_ori_StdDev_El.String);
+catch
+    if h.start_flag ==0
+        msgbox(sprintf('Make sure that Ranges for all three sources have the same number of steps\nwithin each category:\n          Amplitude\n          Location X\n          Location Y\n          Location Z\n          Orientation Az\n          Orientation El'))
+    end
+end
+%% Sensor Menu
+h.monte_params.sens_type =h.listbox_monte_sens_type.Value;
+h.monte_params.MEG_sens_montage = h.listbox_monte_MEG_sens_montage.Value; 
+h.monte_params.EEG_sens_montage = h.listbox_monte_EEG_sens_montage.Value; 
+h.monte_params.radio_monte_filter_flag = h.radio_monte_filter_flag.Value; 
+h.monte_params.menu_monte_synthetic_real_data = h.menu_monte_synthetic_real_data.Value;
+h.monte_params.menu_monte_synthetic_real_source = h.menu_monte_synthetic_real_source.Value;
+
+%% "Source Modeling" Panel Variables
+h.monte_params.inv_soln = h.listbox_monte_inv_soln.Value;
+h.monte_params.FC_analysis = h.listbox_monte_inv_analyses.Value;
+%% Checking that sensors exist
 if strcmp(h.menu_sens_type.Enable,'inactive')   % means that one of the sensor types does not exist
     if any(h.listbox_monte_sens_type.Value ~= h.menu_sens_type.Value)
         h.listbox_monte_sens_type.Value = h.menu_sens_type.Value;
@@ -4527,78 +5606,108 @@ if strcmp(h.menu_sens_type.Enable,'inactive')   % means that one of the sensor t
     end
 else
 end
-%% Ranges
-try
-    h.monte_params.num_sims = h.edit_monte_num_sims.String;
-    h.monte_params.source_amp_range=[];
-    h.monte_params.source_loc_range_X=[];  h.monte_params.source_loc_range_Y=[];  h.monte_params.source_loc_range_Z=[];
-    h.monte_params.source_ori_range_Az=[]; h.monte_params.source_ori_range_El=[];
-    for v=1:3
-        % Amp
-        h.monte_params.source_amp_range(v,:) = str2num(h.edit_monte_source_amp_range(v).String);
-        % Loc
-        h.monte_params.source_loc_range_X(v,:) = str2num(h.edit_monte_source_loc_range_X(v).String);
-        h.monte_params.source_loc_range_Y(v,:) = str2num(h.edit_monte_source_loc_range_Y(v).String);
-        h.monte_params.source_loc_range_Z(v,:) = str2num(h.edit_monte_source_loc_range_Z(v).String);
-        % Ori
-        h.monte_params.source_ori_range_Az(v,:) = str2num(h.edit_monte_source_ori_range_Az(v).String);
-        h.monte_params.source_ori_range_El(v,:) = str2num(h.edit_monte_source_ori_range_El(v).String);
-        
+%% Real/Synthetic Data
+h.monte_params.real_datadir = [];
+h.monte_params.monte_real_sensor_files = [];
+if h.menu_monte_synthetic_real_data.Value > 2  % Real Sensor Data
+    if exist(h.real_noise_datadir_txt.String,'dir')
+        xdir = dir(fullfile(h.real_noise_datadir_txt.String,'*.mat'));
+        h.monte_real_sensor_files = {xdir.name};
+        h.monte_params.real_datadir = h.real_noise_datadir_txt.String;
+        h.monte_params.monte_real_sensor_files = h.monte_real_sensor_files;
+    else
+        h.monte_real_sensor_files = []; h.monte_params.monte_real_sensor_files = [];
     end
-catch
-    msgbox(sprintf('Make sure that Ranges for all three sources have the same number of steps\nwithin each category:\n          Amplitude\n          Location X\n          Location Y\n          Location Z\n          Orientation Az\n          Orientation El'))
+    h.edit_monte_num_sims.String = length(h.monte_real_sensor_files);
 end
-% SNR
-%% Std Devs
-% Amp
-h.monte_params.source_amp_StdDev = str2num(h.edit_monte_source_amp_StdDev.String);
-% Locs
-h.monte_params.source_loc_StdDev_X = str2num(h.edit_monte_source_loc_StdDev_X.String);
-h.monte_params.source_loc_StdDev_Y = str2num(h.edit_monte_source_loc_StdDev_Y.String);
-h.monte_params.source_loc_StdDev_Z = str2num(h.edit_monte_source_loc_StdDev_Z.String);
-% Ori
-h.monte_params.source_ori_StdDev_Az = str2num(h.edit_monte_source_ori_StdDev_Az.String);
-h.monte_params.source_ori_StdDev_El = str2num(h.edit_monte_source_ori_StdDev_El.String);
-% SNR
-h.monte_params.SNR_StdDev = str2num(h.edit_monte_SNR_StdDev.String);
-h.monte_params.plv_StdDev = str2num(h.edit_monte_plv_StdDev.String);
-%% other params
-h.monte_params.SNR_range = str2num(h.edit_monte_SNR_range.String); h.monte_params.SNR_StdDev = str2num(h.edit_monte_SNR_StdDev.String);
-h.monte_params.plv_range = str2num(h.edit_monte_plv_range.String); h.monte_params.plv_StdDev = str2num(h.edit_monte_plv_StdDev.String);
 
-h.monte_params.inv_soln = h.listbox_monte_inv_soln.Value;
-h.monte_params.FC_analysis = h.listbox_monte_inv_analyses.Value;
+%% "Data & Results to Save" Panel Variables
 h.monte_params.save_FT_data = h.radio_monte_save_FT_data.Value;
-h.monte_params.sens_type =h.listbox_monte_sens_type.Value;
+
+try
+h.monte_params.listbox_monte_saved_sim_data = h.listbox_monte_saved_sim_data.String(h.listbox_monte_saved_sim_data.Value);
+h.monte_params.listbox_monte_saved_true_source = h.listbox_monte_saved_true_source.String(h.listbox_monte_saved_true_source.Value);
+h.monte_params.listbox_monte_saved_true_source_TFR_results = h.listbox_monte_saved_true_source_TFR_results.String(h.listbox_monte_saved_true_source_TFR_results.Value);
+
+h.monte_params.listbox_monte_saved_inv_soln = h.listbox_monte_saved_inv_soln.String(h.listbox_monte_saved_inv_soln.Value);
+h.monte_params.listbox_monte_saved_inv_soln_soln = h.listbox_monte_saved_inv_soln_soln.String(h.listbox_monte_saved_inv_soln_soln.Value);
+h.monte_params.listbox_monte_saved_inv_soln_TFR_results = h.listbox_monte_saved_inv_soln_TFR_results.String(h.listbox_monte_saved_inv_soln_TFR_results.Value);
+catch
+    fprintf('Error when updating "Data & Results to Save" in monte_params\n'); 
+end
+
+h.monte_params.cfg = h.cfg; 
+fprintf('Updated Monte Carlo Parameters\n'); 
+
 function menu_monte_synthetic_real_data_Callback(varargin)
 global h
-h.btn_set_real_datadir.Visible = 'off';
-h.real_datadir_txt.Visible = 'off';
+h.btn_set_real_noise_datadir.Visible = 'off';
+h.real_noise_datadir_txt.Visible = 'off';
+h.btn_set_real_source_datadir.Visible = 'off';
+h.real_source_datadir_txt.Visible = 'off';
 
+%% Real Noise Directory
 if h.menu_monte_synthetic_real_data.Value == 4  % Real Sensor Noise
-    h.btn_set_real_datadir.Visible = 'on';
-    h.real_datadir_txt.Visible = 'on';
+    h.btn_set_real_noise_datadir.Visible = 'on'; h.btn_set_real_noise_datadir.String = 'Set Real Noise Dir';
+    h.real_noise_datadir_txt.Visible = 'on';
+elseif h.menu_monte_synthetic_real_data.Value == 5  % Real Sensor Noise
+    h.btn_set_real_noise_datadir.Visible = 'on'; h.btn_set_real_noise_datadir.String = 'Set Real Resting Dir';
+    h.real_noise_datadir_txt.Visible = 'on';
 end
+%% Real Source Directory
 if h.menu_monte_synthetic_real_source.Value == 2  % Real Source Data
-    h.btn_set_real_datadir.Visible = 'on';
-    h.real_datadir_txt.Visible = 'on';
+h.btn_set_real_source_datadir.Visible = 'on';
+h.real_source_datadir_txt.Visible = 'on';
 end
 function btn_set_real_datadir(varargin)
 global h
+switch varargin{end}
+    case 'Noise'
+        h.real_noise_datadir = uigetdir(h.real_noise_datadir,'Set Real Noise Directory');
+        h.real_noise_datadir_txt.String = h.real_noise_datadir;
+    case 'Source'
+        h.real_source_datadir = uigetdir(h.real_source_datadir,'Set Real Source Directory');
+        h.real_source_datadir_txt.String = h.real_source_datadir;
+end
 
-h.real_datadir = uigetdir(h.real_datadir,'Set Real Data Directory');
-h.real_datadir_txt.String = h.real_datadir;
+
 function run_monte_carlo(varargin)
 global h
 
 update_monte_carlo; % just in case user changed something before clicking on run
 % h.monte_real_file_idx = 0; % index of files within the "Set Real Dir" for running "Real Sensor" Monte-Carlo simulations
-if exist(h.real_datadir_txt.String,'dir')
-    xdir = dir(fullfile(h.real_datadir_txt.String,'*.mat'));
-    h.monte_real_sensor_files = {xdir.name};
+if isfield(h,'real_source_datadir')
+    if exist(h.real_source_datadir_txt.String,'dir')
+        xdir = dir(fullfile(h.real_source_datadir_txt.String,'*.mat'));
+        h.monte_real_source_files = {xdir.name};
+    else
+        h.monte_real_source_files = [];
+    end
+else
+    h.monte_real_source_files = [];
+end
+if isfield(h,'real_noise_datadir')
+    if exist(h.real_source_datadir_txt.String,'dir')
+        xdir = dir(fullfile(h.real_noise_datadir_txt.String,'*.mat'));
+        h.monte_real_sensor_files = {xdir.name};
+    else
+        h.monte_real_sensor_files = [];
+    end
 else
     h.monte_real_sensor_files = [];
 end
+
+%% Save Tabs as .jpg as hard-copy of study parameters
+% hm2 = msgbox('Saving each Tab as .png for hard-copy backup of parameters','Please Wait');
+% h.tabgrp.SelectedTab = h.tab_power; saveas(h.main_fig,fullfile(h.data_dir,sprintf('%s_ERP_tab.png',h.cfg.study.study_name)) );
+% h.tabgrp.SelectedTab = h.tab_power; saveas(h.main_fig,fullfile(h.data_dir,sprintf('%s_ERP_tab.png',h.cfg.study.study_name)) );
+% h.tabgrp.SelectedTab = h.tab_PLV; saveas(h.main_fig,fullfile(h.data_dir,sprintf('%s_PLV_tab.png',h.cfg.study.study_name)) );
+% h.tabgrp.SelectedTab = h.tab_PLI; saveas(h.main_fig,fullfile(h.data_dir,sprintf('%s_PLI_tab.png',h.cfg.study.study_name)) );
+% h.tabgrp.SelectedTab = h.tab_PAC; saveas(h.main_fig,fullfile(h.data_dir,sprintf('%s_PAC_tab.png',h.cfg.study.study_name)) );
+% h.tabgrp.SelectedTab = h.tab_sim_meeg; saveas(h.main_fig,fullfile(h.data_dir,sprintf('%s_ForwardModel_tab.png',h.cfg.study.study_name)) );
+% h.tabgrp.SelectedTab = h.tab_source_modeling; saveas(h.main_fig,fullfile(h.data_dir,sprintf('%s_InverseModel_tab.png',h.cfg.study.study_name)) );
+% h.tabgrp.SelectedTab = h.tab_monte_carlo; saveas(h.main_fig,fullfile(h.data_dir,sprintf('%s_MonteCarlo_tab.png',h.cfg.study.study_name)) );
+% close(hm2); 
 
 h.waitfor_panel.Visible='on'; h.waitfor_txt.String = sprintf('Monte Carlo Simulation\n\n     Running');
 h.monte_carlo_flag = 1;    % turning on flag for when Monte Carlo Sims are running
@@ -4646,25 +5755,32 @@ else
 end
 
 %% Run Monte Loop
-hw = waitbar(0,'Running Monte-Carlo Simulations');
+% hw = waitbar(0,'Running Monte-Carlo Simulations');
 % h.monte_params=[];
 h.monte_params.sim_run_num = str2num(h.edit_monte_run_num.String)-1; % iterating through monte carlo simulation
 
-if h.menu_monte_synthetic_real_data.Value == 1  % 'Synthetic Data' - simulate data from user-defined singals+prepost
+if h.menu_monte_synthetic_real_data.Value <= 2  % 'Synthetic Data' - simulate data from user-defined singals+prepost
     num_runs = str2num(h.edit_monte_num_sims.String);
-elseif h.menu_monte_synthetic_real_data.Value >= 2  % 'Real Sensors + Sources' - load real sensors data and randomize phase + load in source waveform data
+elseif h.menu_monte_synthetic_real_data.Value > 2  % 'Real Sensors + Sources' - load real sensors data and randomize phase + load in source waveform data
     num_runs = length(h.monte_real_sensor_files); h.edit_monte_num_sims.String = num_runs;
+end
+
+if h.radio_monte_rand_source_locs.Value == 1  % setting loc and ori ranges to zero because randomizing is set for each run
+    h.monte_params.source_ori_range_Az = [0 0 0]'; h.monte_params.source_loc_range_X = [0 0 0]';
 end
 
 num_trials = str2num(h.edit_monte_num_trials.String);
 num_reruns = str2num(h.edit_monte_num_reruns.String);
 nn=0; % number of simulations completed as iterating through all possibile parameters
-
+% removing TFR results from cfg
+if isfield(h.cfg.source,'TFR_results')
+    h.cfg.source = rmfield(h.cfg.source,'TFR_results');
+end
 for nr = 1:num_reruns
-%     h.monte_params.sim_run_num = h.monte_params.sim_run_num+1;
+    %     h.monte_params.sim_run_num = h.monte_params.sim_run_num+1;
     for r = 1:num_runs     % Looping through number of runs
-    h.monte_params.sim_run_num =  h.monte_params.sim_run_num + 1;
-
+        h.monte_params.sim_run_num =  h.monte_params.sim_run_num + 1;
+        
         for nt = 1:length(num_trials) % numbr of trials
             h.edit_num_trials.String = num2str(num_trials(nt));
             
@@ -4698,18 +5814,27 @@ for nr = 1:num_reruns
                     h.sim_data = rmfield(h.sim_data,'sens_final_org');
                     h.sim_data = rmfield(h.sim_data,'sens_noise_final_org');
                     h.sim_data = rmfield(h.sim_data,'sens_sig_data_org');
+                end
+                if isfield(h.sim_data,'sig_final_org')
                     h.sim_data = rmfield(h.sim_data,'sig_final_org');
                 end
                 
+                
+                
                 %% Source Waveforms: Simulate "Synthetic" or Load "Real" - same source waveforms for all following changes in parameters such as location, orientation, sensor type, amplitudes, SNRs
                 if h.menu_monte_synthetic_real_source.Value == 1  % 'Synthetic Source Waveforms' - simulate source waveforms from user-defined singals+prepost
-                    [h.sim_data.sig_final,h.sim_data.sig_wav,h.sim_data.prepost_wav,h.sim_data.noise_wav,h.sim_data.cfg,h.sim_data.prepost_win,h.sim_data.sig_win] = SimSignals(h.monte_params.cfg);
+%                     [h.sim_data.sig_final,h.sim_data.sig_wav,h.sim_data.prepost_wav,h.sim_data.noise_wav,h.sim_data.cfg,h.sim_data.prepost_win,h.sim_data.sig_win] = SimSignals(h.monte_params.cfg);
+                run_sim(h.btn_run_sim,[]);
+
                 elseif h.menu_monte_synthetic_real_source.Value == 2  % 'Real Sensors + Sources' - load real sensors data and randomize phase + load in source waveform data
                     %             h.monte_real_file_idx =  h.monte_real_file_idx + 1; % index of files within the "Set Real Dir" for running "Real Sensor" Monte-Carlo simulations
-                    if exist(h.real_datadir_txt.String,'dir')
-                        h.monte_real_dsname = fullfile(h.real_datadir_txt.String,h.monte_real_sensor_files{r});
+                    if exist(h.real_source_datadir_txt.String,'dir')
+                        r2 = h.monte_params.sim_run_num; 
+                        if r2>length(h.monte_real_source_files); rn=randperm(length(h.monte_real_source_files)); r2=rn(1); end
+                        h.monte_real_dsname = fullfile(h.real_source_datadir_txt.String,h.monte_real_source_files{r2});
                         if exist(h.monte_real_dsname,'file')
                             sm_load_source_waves;          % load source data
+                            h.listbox_sources.Value=1:3; plot_source_data;
                         end
                     end
                 end
@@ -4734,6 +5859,9 @@ for nr = 1:num_reruns
                     % setting locs before simulating M/EEG
                     for v=1:3; h.edit_source_locs(v).String = num2str(source_locs(v,:)); end
                     
+                    
+
+                    
                     %% ORIENTATION Change from initial source locations based on random norm distribution for parameters set in Monte Carlo Tab by "Orientation Range (min:step:max)" and "Std Dev"
                     for m = 1:size(h.monte_params.source_ori_range_Az,2) % looping through "Location Range (min:step:max)"
                         
@@ -4750,7 +5878,12 @@ for nr = 1:num_reruns
                         
                         % setting orientations before simulating M/EEG
                         for v=1:3; h.edit_source_ori(v).String = num2str(source_ori(v,:)); end
-                        
+                      
+                        %% Randomize Locations and Orientations
+                        if h.radio_monte_rand_source_locs.Value == 1
+                            sm_randomize_source_locs; % randomizing source locations
+                        end
+                                          
                         %% AMPLITUDE Values based on random norm distribution for parameters set in Monte Carlo Tab by "Amplitude Range (min:step:max)" and "Std Dev"
                         for a=1:size(h.monte_params.source_amp_range,2) % looping through "Amplitude Range (min:step:max)"
                             
@@ -4780,183 +5913,218 @@ for nr = 1:num_reruns
                                 
                                 %% SENSOR Type
                                 for st = 1:length(h.monte_params.sens_type) % SENSOR Type
-                                    %% SENSOR Type
-                                    h.menu_sens_type.Value = h.monte_params.sens_type(st);
-                                    
-                                    edit_source_CallBack([],[]);
-                                    
-                                    menu_head_model_CallBack();
-                                    
-                                    %% Simulate Sensor Noise: Simulate "Synthetic" of Load "Real" Sensor Noise
-                                    if h.menu_monte_synthetic_real_data.Value < 3  % 'Synthetic Data' - simulate data from user-defined singals+prepost
-                                        %% Simulating New Noise based on
-                                        sim_sens_noise;
-                                    elseif h.menu_monte_synthetic_real_data.Value == 4  % 'Real Sensors + Sources' - load real sensors data and randomize phase + load in source waveform data
-                                        %             h.monte_real_file_idx =  h.monte_real_file_idx + 1; % index of files within the "Set Real Dir" for running "Real Sensor" Monte-Carlo simulations
-                                        if exist(h.real_datadir_txt.String,'dir')
-                                            h.monte_real_dsname = fullfile(h.real_datadir_txt.String,h.monte_real_sensor_files{r});
-                                            if exist(h.monte_real_dsname,'file')
-                                                sm_load_real_sensor_file([],[],'noise');   % load real sensor data to h.sim_data.sens_noise as generated sensor noise
-                                                sm_fft_randomize_phase;     % randomize phase of sensor data
-                                            end
-                                            
-                                        end
-                                    elseif h.menu_monte_synthetic_real_data.Value == 5  % 'Real Full Data' - load real sensors data and analyze - no simulation conducted
-                                        sm_load_real_sensor_file([],[],'final');   % load real sensor data to h.sim_data.sens_final as generated sensor data for analyses
-                                        if isfield(h,'filt_design'); if ~isempty(h.filt_design);sm_filter_data_Callback; end; end    % filtering data
+                                    if h.monte_params.sens_type(st)==1 % MEG sensors selected
+                                        h.sens_montage = h.monte_params.MEG_sens_montage;
+                                    elseif h.monte_params.sens_type(st)==2 % EEG sensors selected
+                                        h.sens_montage = h.monte_params.EEG_sens_montage;
                                     end
                                     
-                                    %% simulating M/EEG data
-                                    sim_meeg;    % combines the sensor data and the forward-projected source waveforms for respective SNR values
-                                    
-                                    %% Filter Data
-                                    if h.radio_monte_filter_flag.Value == 1
-                                        varin.String ='Filter Data';
-                                        if isfield(h,'filt_design'); if ~isempty(h.filt_design); sm_filter_data_Callback(varin); end; end    % filtering data
-                                    end
-                                    
-                                    %% running batch source modeling
-                                    if ~isempty(h.listbox_monte_inv_soln.Value)
-                                        %% clearing all inverse solutions to start fresh
-                                        try
-                                            h.listbox_inv_solns.Value = 1:length(h.listbox_inv_solns.String);
-                                            delete_inv_solns;
-                                        catch
-                                        end
-                                    end
-                                    if h.radio_monte_source_modeling.Value==1
-                                        for inv = h.listbox_monte_inv_soln.Value
-                                            h.current_inv_soln=inv;
-                                            h.menu_inv_soln.Value = inv;
-                                            menu_inv_soln_txt_Callback;
-                                            
-                                            if  strcmp(h.menu_inv_soln.String{h.menu_inv_soln.Value},'dics') || ...
-                                                    strcmp(h.menu_inv_soln.String{h.menu_inv_soln.Value},'pcc')
-                                                sm_ft_freqanalysis; % perform FT timefreq for dics and pcc inverse modeling
-                                                h.menu_inv_datatype.Value = 2;  % doing time-freq modeling
-                                            end
-                                            
-                                            run_source_modeling;
-                                            h.slider_3D_image_thresh.Value = 0;
-                                            h.inv_soln(h.current_inv_soln).soln.plot_thresh =0;
-                                            h.slider_3D_image_thresh.Min = 0;
-                                            bs_plot_inv_soln;
-                                            if ~isempty(h.current_3D_peak_idx)
-                                                h.inv_soln(h.current_inv_soln).soln.peak_idx_found = h.current_3D_peak_idx(1:3); % nearest 3 found peaks relative to true source peaks
-                                                h.inv_soln(h.current_inv_soln).soln.true_source_idx = h.sim_data.cfg.source.vx_idx; % nearest 3 found peaks relative to true source peaks
-                                                
-                                                h.inv_soln(h.current_inv_soln).soln.error_locs = h.current_mse_locs;
-                                                h.inv_soln(h.current_inv_soln).soln.error_ori = h.current_mse_ori;
-                                                h.inv_soln(h.current_inv_soln).soln.error_waves = h.current_mse_evk_waves;
-                                            else
-                                                h.inv_soln(h.current_inv_soln).soln.peak_idx_found = []; % nearest 3 found peaks relative to true source peaks
-                                                h.inv_soln(h.current_inv_soln).soln.true_source_idx = []; % nearest 3 found peaks relative to true source peaks
-                                                
-                                                h.inv_soln(h.current_inv_soln).soln.error_locs = [];
-                                                h.inv_soln(h.current_inv_soln).soln.error_ori = [];
-                                                h.inv_soln(h.current_inv_soln).soln.error_waves = [];
-                                            end
-                                            if h.monte_params.FC_analysis == 2 && ~isempty(h.current_3D_peak_idx) % Perform functional connectivity analyses
-                                                sm_downsample_leadfield;
-                                                sm_menu_inv_analyses_CallBack;
-                                                sm_create_plv_contrasts;
-                                                sm_calc_PLV_PLI;
-                                                if isfield(h.cfg.source,'TFR_results')
-                                                    if isempty(h.cfg.source.TFR_results)
-                                                        sm_calc_true_PLV_PLI;
-                                                    end
-                                                else
-                                                    sm_calc_true_PLV_PLI;
+                                    for sm = 1:length(h.sens_montage) % number of sensors
+                                        t_start = tic;
+                                        %% SENSOR Type
+                                        h.menu_sens_type.Value = h.monte_params.sens_type(st);
+                                        h.menu_sens_montage.Value = h.sens_montage(sm); 
+                                        
+                                        edit_source_CallBack([],[]);
+                                        
+                                        menu_head_model_CallBack();
+                                        
+                                        %% Simulate Sensor Noise: Simulate "Synthetic" of Load "Real" Sensor Noise
+                                        if h.menu_monte_synthetic_real_data.Value == 1  % 'Synthetic Data' - simulate data from user-defined singals+prepost
+                                            %% Simulating New Noise based on
+                                            sim_sens_noise;
+                                        elseif h.menu_monte_synthetic_real_data.Value == 2  % 'Synthetic Data' - simulate data from user-defined singals+prepost
+                                            %% Simulating New Noise based on
+                                            % updating brain noise locs and plotting of 3D brain
+                                            btn_rand_brain_noise_locs_Callback([],[]);
+                                            plot_3D_mri; btn_plot_noise_locs
+                                            sim_sens_noise;
+                                        elseif h.menu_monte_synthetic_real_data.Value == 4  % 'Real Sensors + Sources' - load real sensors data and randomize phase + load in source waveform data
+                                            %             h.monte_real_file_idx =  h.monte_real_file_idx + 1; % index of files within the "Set Real Dir" for running "Real Sensor" Monte-Carlo simulations
+                                            if exist(h.real_source_datadir_txt.String,'dir')
+                                                if r>length(h.monte_real_sensor_files); rn=randperm(length(h.monte_real_sensor_files)); r2=rn(1); else; r2=r;end
+                                                h.monte_real_dsname = fullfile(h.real_noise_datadir_txt.String,h.monte_real_sensor_files{r2});
+                                                if exist(h.monte_real_dsname,'file')
+                                                    sm_load_real_sensor_file([],[],'noise');   % load real sensor data to h.sim_data.sens_noise as generated sensor noise
+                                                    sm_fft_randomize_phase;     % randomize phase of sensor data
                                                 end
                                                 
-                                                %                                         bs_calc_FC;
-                                                %                                         h.inv_soln(h.current_inv_soln).FC_results.TFR_freqs = h.current_TFR_freqs;
-                                                %                                         h.inv_soln(h.current_inv_soln).FC_results.coi_wt2 = h.current_coi_wt2;
-                                                %                                         h.inv_soln(h.current_inv_soln).FC_results.PLV_freqs = h.current_PLV_freqs;
-                                                %                                         h.inv_soln(h.current_inv_soln).FC_results.pli_lat = h.current_pli_lat;
-                                                %
-                                                %                                         h.inv_soln(h.current_inv_soln).FC_results.avg_wt = h.current_avg_wt;
-                                                %                                         h.inv_soln(h.current_inv_soln).FC_results.avg_wt_evk = h.current_avg_wt_evk;
-                                                %                                         h.inv_soln(h.current_inv_soln).FC_results.avg_wt_ind = h.current_avg_wt_ind;
-                                                %                                         h.inv_soln(h.current_inv_soln).FC_results.plv_data = h.current_plv_data;
-                                                %                                         h.inv_soln(h.current_inv_soln).FC_results.pli_data = h.current_plv_data;
-                                                %                                         h.inv_soln(h.current_inv_soln).FC_results.plv_based = h.current_plv_based;
-                                                %                                         h.inv_soln(h.current_inv_soln).FC_results.pli_based = h.current_pli_based;
-                                                %                                         h.inv_soln(h.current_inv_soln).FC_results.dpli_based = h.current_dpli_based;
-                                                
-                                            elseif h.monte_params.FC_analysis == 2 && isempty(h.current_3D_peak_idx)
-                                                h.inv_soln(h.current_inv_soln).TFR_results = [];
+                                            end
+                                        elseif h.menu_monte_synthetic_real_data.Value == 5  % 'Resting State Data' - load real resting-state sensors data and analyze - no simulation conducted
+                                               r2 = h.monte_params.sim_run_num;   
+                                            if r2>length(h.monte_real_sensor_files); rn=randperm(length(h.monte_real_sensor_files)); r2=rn(1); end
+                                                h.monte_real_dsname = fullfile(h.real_noise_datadir_txt.String,h.monte_real_sensor_files{r2});
+                                            sm_load_real_sensor_file([],[],'noise');   % load real sensor data to h.sim_data.sens_final as generated sensor data for analyses
+%                                             if isfield(h,'filt_design'); varin.String = 'Filter Data'; if ~isempty(h.filt_design); sm_filter_data_Callback(varin); end; end    % filtering data
+                                        end
+                                        
+                                        %% simulating M/EEG data
+                                        sim_meeg;    % combines the sensor data and the forward-projected source waveforms for respective SNR values
+                                        
+                                        %% Filter Data
+                                        if h.radio_monte_filter_flag.Value == 1
+                                            varin.String ='Filter Data';
+                                            if isfield(h,'filt_design'); if ~isempty(h.filt_design); sm_filter_data_Callback(varin); end; end    % filtering data
+                                        end
+                                        
+                                        %% running batch source modeling
+                                        if ~isempty(h.listbox_monte_inv_soln.Value)
+                                            %% clearing all inverse solutions to start fresh
+                                            try
+                                                h.listbox_inv_solns.Value = 1:length(h.listbox_inv_solns.String);
+                                                delete_inv_solns;
+                                            catch
                                             end
                                         end
-                                    else
-                                    end
-                                    
-                                    if h.menu_monte_synthetic_real_data.Value == 1  % 'Synthetic Data' - simulate data from user-defined singals+prepost
-                                        xsname = sprintf('%s_%s_Amps_%.f_%.f_%.f_LocX_%.f_%.f_%.f_LocY_%.f_%.f_%.f_LocZ_%.f_%.f_%.f_Az_%.f_%.f_%.f_El_%.f_%.f_%.f_SNR_%.3f_PLV_%.3f_Trials_%s_Run_%.f.mat',...
-                                            h.cfg.study.study_name,h.menu_sens_type.String{h.menu_sens_type.Value},amp_mu,locX_mu,locY_mu,locZ_mu,oriAz_mu,oriEl_mu,snr_mu,h.monte_params.plv_range(p),h.edit_num_trials.String,h.monte_params.sim_run_num);
-                                        sname = fullfile(h.data_dir,xsname);
-%                                         while exist(sname,'file') % do not overwrite existing file but add run number
-%                                             fprintf('File Exist!  %s\n',sname);
-%                                             h.monte_params.sim_run_num=h.monte_params.sim_run_num+1;
-%                                             xsname = sprintf('%s_%s_Amps_%.f_%.f_%.f_LocX_%.f_%.f_%.f_LocY_%.f_%.f_%.f_LocZ_%.f_%.f_%.f_Az_%.f_%.f_%.f_El_%.f_%.f_%.f_SNR_%.3f_PLV_%.3f_Trials_%s_Run_%.f.mat',...
-%                                                 h.cfg.study.study_name,h.menu_sens_type.String{h.menu_sens_type.Value},amp_mu,locX_mu,locY_mu,locZ_mu,oriAz_mu,oriEl_mu,snr_mu,h.monte_params.plv_range(p),h.edit_num_trials.String,h.monte_params.sim_run_num);
-%                                             sname = fullfile(h.data_dir,xsname);
-%                                             fprintf('New File Name = %s\n',sname);
-%                                         end
-                                    elseif h.menu_monte_synthetic_real_data.Value >= 2  % 'Real Sensors or Sources' - load real sensors data and randomize phase + load in source waveform data
-                                        [~,real_fname,~]= fileparts(h.monte_real_sensor_files{r});
-                                        xsname = sprintf('%s_%s_Amps_%.f_%.f_%.f_LocX_%.f_%.f_%.f_LocY_%.f_%.f_%.f_LocZ_%.f_%.f_%.f_Az_%.f_%.f_%.f_El_%.f_%.f_%.f_SNR_%.3f_PLV_%.3f_Trials_%s_Run_%.f.mat',...
-                                            real_fname,h.menu_sens_type.String{h.menu_sens_type.Value},amp_mu,locX_mu,locY_mu,locZ_mu,oriAz_mu,oriEl_mu,snr_mu,h.monte_params.plv_range(p),h.edit_num_trials.String,h.monte_params.sim_run_num);
-                                        sname = fullfile(h.data_dir,xsname);
-%                                         while exist(sname,'file') % do not overwrite existing file but add run number
-%                                             fprintf('File Exist!  %s\n',sname);
-%                                             h.monte_params.sim_run_num = h.monte_params.sim_run_num+1;
-%                                             xsname = sprintf('%s_%s_Amps_%.f_%.f_%.f_LocX_%.f_%.f_%.f_LocY_%.f_%.f_%.f_LocZ_%.f_%.f_%.f_Az_%.f_%.f_%.f_El_%.f_%.f_%.f_SNR_%.3f_PLV_%.3f_Trials_%s_Run_%.f.mat',...
-%                                                 real_fname,h.menu_sens_type.String{h.menu_sens_type.Value},amp_mu,locX_mu,locY_mu,locZ_mu,oriAz_mu,oriEl_mu,snr_mu,h.monte_params.plv_range(p),h.edit_num_trials.String,h.monte_params.sim_run_num);
-%                                             sname = fullfile(h.data_dir,xsname);
-%                                             fprintf('New File Name = %s\n',sname);
-%                                         end
-                                    end
-                                    
-                                    fprintf('Saving:    %s\n',sname);
-                                    
-                                    cfg = h.monte_params.cfg;
-                                    monte_params = h.monte_params;
-                                    study_name = h.cfg.study.study_name;
-                                    sim_data = h.sim_data;
-                                    
-                                    % converting to single-point precision for storage
-                                    sim_data = double2single(sim_data);
-                                    
-                                    
-                                    % Save Field Trip format along with the BS data format
-                                    if h.radio_monte_save_FT_data.Value==1
-                                        ft_data = convert_bs2ft_data(h.sim_data.sens_final,h.anatomy,h.cfg);
-                                        ft_data = h.ft_data;
-                                        save(sname,'cfg','sim_data','ft_data','monte_params','study_name');
-                                    else
-                                        save(sname,'cfg','sim_data','monte_params','study_name');
-                                    end
-                                    
-                                    if ~isempty(h.listbox_monte_inv_soln.Value)
-                                        inv_soln = h.inv_soln;
-%                                         inv_soln = double2single(inv_soln);
+                                        if h.radio_monte_source_modeling.Value==1
+                                            for inv = h.listbox_monte_inv_soln.Value
+                                                h.current_inv_soln=inv;
+                                                h.menu_inv_soln.Value = inv;
+                                                menu_inv_soln_txt_Callback;
+                                                
+                                                if  strcmp(h.menu_inv_soln.String{h.menu_inv_soln.Value},'dics') || ...
+                                                        strcmp(h.menu_inv_soln.String{h.menu_inv_soln.Value},'pcc')
+                                                    sm_ft_freqanalysis; % perform FT timefreq for dics and pcc inverse modeling
+                                                    h.menu_inv_datatype.Value = 2;  % doing time-freq modeling
+                                                end
+                                                
+                                                run_source_modeling;
+                                                
+                                                h.slider_3D_image_thresh.Value = 0;
+                                                h.inv_soln(h.current_inv_soln).soln.plot_thresh =0;
+                                                h.slider_3D_image_thresh.Min = 0;
+                                                bs_plot_inv_soln;
+                                                
+                                                parfevalOnAll(@clearvars, 0) % clears parfor memory
+
+                                                if ~isempty(h.current_3D_peak_idx)
+                                                    h.inv_soln(h.current_inv_soln).soln.peak_idx_found = h.current_3D_peak_idx(1:3); % nearest 3 found peaks relative to true source peaks
+                                                    h.inv_soln(h.current_inv_soln).soln.true_source_idx = h.sim_data.cfg.source.vx_idx; % nearest 3 found peaks relative to true source peaks
+                                                    
+                                                    h.inv_soln(h.current_inv_soln).soln.error_locs = h.current_mse_locs;
+                                                    h.inv_soln(h.current_inv_soln).soln.error_ori = h.current_mse_ori;
+                                                    h.inv_soln(h.current_inv_soln).soln.error_waves = h.current_mse_evk_waves;
+                                                else
+                                                    h.inv_soln(h.current_inv_soln).soln.peak_idx_found = []; % nearest 3 found peaks relative to true source peaks
+                                                    h.inv_soln(h.current_inv_soln).soln.true_source_idx = []; % nearest 3 found peaks relative to true source peaks
+                                                    
+                                                    h.inv_soln(h.current_inv_soln).soln.error_locs = [];
+                                                    h.inv_soln(h.current_inv_soln).soln.error_ori = [];
+                                                    h.inv_soln(h.current_inv_soln).soln.error_waves = [];
+                                                end
+                                                if h.monte_params.FC_analysis == 2 && ~isempty(h.current_3D_peak_idx) % Perform functional connectivity analyses
+                                                    sm_downsample_leadfield;
+                                                    sm_menu_inv_analyses_CallBack;
+                                                    sm_create_plv_contrasts;
+                                                    sm_calc_PLV_PLI;
+                                                    if isfield(h.cfg.source,'TFR_results')
+                                                        if isempty(h.sim_data.cfg.source.TFR_results)
+                                                            sm_calc_true_PLV_PLI;
+                                                        end
+                                                    else
+                                                        sm_calc_true_PLV_PLI;
+                                                    end
+                                                    sm_calc_ROI_FC_metrics; % calculating ROI metrics
+                                                    sm_plot_ROI_FC_metrics;
+                                                    
+                                                    %                                         bs_calc_FC;
+                                                    %                                         h.inv_soln(h.current_inv_soln).FC_results.TFR_freqs = h.current_TFR_freqs;
+                                                    %                                         h.inv_soln(h.current_inv_soln).FC_results.coi_wt2 = h.current_coi_wt2;
+                                                    %                                         h.inv_soln(h.current_inv_soln).FC_results.PLV_freqs = h.current_PLV_freqs;
+                                                    %                                         h.inv_soln(h.current_inv_soln).FC_results.pli_lat = h.current_pli_lat;
+                                                    %
+                                                    %                                         h.inv_soln(h.current_inv_soln).FC_results.avg_wt = h.current_avg_wt;
+                                                    %                                         h.inv_soln(h.current_inv_soln).FC_results.avg_wt_evk = h.current_avg_wt_evk;
+                                                    %                                         h.inv_soln(h.current_inv_soln).FC_results.avg_wt_ind = h.current_avg_wt_ind;
+                                                    %                                         h.inv_soln(h.current_inv_soln).FC_results.plv_data = h.current_plv_data;
+                                                    %                                         h.inv_soln(h.current_inv_soln).FC_results.pli_data = h.current_plv_data;
+                                                    %                                         h.inv_soln(h.current_inv_soln).FC_results.plv_based = h.current_plv_based;
+                                                    %                                         h.inv_soln(h.current_inv_soln).FC_results.pli_based = h.current_pli_based;
+                                                    %                                         h.inv_soln(h.current_inv_soln).FC_results.dpli_based = h.current_dpli_based;
+                                                    
+                                                elseif h.monte_params.FC_analysis == 2 && isempty(h.current_3D_peak_idx)
+                                                    h.inv_soln(h.current_inv_soln).TFR_results = [];
+                                                end
+                                            end
+                                        else
+                                        end
                                         
-                                        save(sname,'inv_soln','-append');
-                                        %% clearing all inverse solutions to start fresh for next run
-                                        h.listbox_inv_solns.Value = 1:length(h.listbox_inv_solns.String);
-                                        try delete_inv_solns; catch; end
+                                        noise_types = {'SynthNoise' 'BrainNoise' 'GANNoise' 'RealSensorNoise' 'RealRestingNoise'};
+                                        try    num_sens = cellstr(h.menu_sens_montage.String); num_sens = strtrim(num_sens{h.sens_montage(sm)}); catch; num_sens = h.menu_sens_montage.String; end
+                                        if h.menu_monte_synthetic_real_data.Value <5  % 'Synthetic Data' - simulate data from user-defined singals+prepost
+                                            %                                             xsname = sprintf('%s_%s%.f_Amps_%.f_%.f_%.f_LocX_%.f_%.f_%.f_LocY_%.f_%.f_%.f_LocZ_%.f_%.f_%.f_Az_%.f_%.f_%.f_El_%.f_%.f_%.f_SNR_%.3f_PLV_%.3f_Trials_%s_Run_%.f.mat',...
+                                            %                                                 h.cfg.study.study_name,h.menu_sens_type.String{h.menu_sens_type.Value},h.menu_sens_montage.String{h.menu_sens_montage.Value},amp_mu,locX_mu,locY_mu,locZ_mu,oriAz_mu,oriEl_mu,snr_mu,h.monte_params.plv_range(p),h.edit_num_trials.String,h.monte_params.sim_run_num);
+                                            xsname = sprintf('%s_%s%s_%s_SourceAmps_%.f_%.f_%.f_LocX_%.f_%.f_%.f_LocY_%.f_%.f_%.f_LocZ_%.f_%.f_%.f_Az_%.f_%.f_%.f_El_%.f_%.f_%.f_SNR_%.3f_PLV_%.3f_Trials_%s_Run_%.f.mat',...
+                                                h.cfg.study.study_name,h.menu_sens_type.String{h.menu_sens_type.Value},num_sens,noise_types{h.menu_monte_synthetic_real_data.Value},amp_mu,locX_mu,locY_mu,locZ_mu,oriAz_mu,oriEl_mu,snr_mu,h.monte_params.plv_range(p),h.edit_num_trials.String,h.monte_params.sim_run_num);
+                                            sname = fullfile(h.data_dir,xsname);
+                                            %                                         while exist(sname,'file') % do not overwrite existing file but add run number
+                                            %                                             fprintf('File Exist!  %s\n',sname);
+                                            %                                             h.monte_params.sim_run_num=h.monte_params.sim_run_num+1;
+                                            %                                             xsname = sprintf('%s_%s_Amps_%.f_%.f_%.f_LocX_%.f_%.f_%.f_LocY_%.f_%.f_%.f_LocZ_%.f_%.f_%.f_Az_%.f_%.f_%.f_El_%.f_%.f_%.f_SNR_%.3f_PLV_%.3f_Trials_%s_Run_%.f.mat',...
+                                            %                                                 h.cfg.study.study_name,h.menu_sens_type.String{h.menu_sens_type.Value},amp_mu,locX_mu,locY_mu,locZ_mu,oriAz_mu,oriEl_mu,snr_mu,h.monte_params.plv_range(p),h.edit_num_trials.String,h.monte_params.sim_run_num);
+                                            %                                             sname = fullfile(h.data_dir,xsname);
+                                            %                                             fprintf('New File Name = %s\n',sname);
+                                            %                                         end
+                                        elseif h.menu_monte_synthetic_real_data.Value == 5  % 'Real Sensors or Sources' - load real sensors data and randomize phase + load in source waveform data
+                                             xsname = sprintf('%s_%s%s_%s_SourceAmps_%.f_%.f_%.f_LocX_%.f_%.f_%.f_LocY_%.f_%.f_%.f_LocZ_%.f_%.f_%.f_Az_%.f_%.f_%.f_El_%.f_%.f_%.f_SNR_%.3f_PLV_%.3f_Trials_%s_Run_%.f.mat',...
+                                                h.cfg.study.study_name,h.menu_sens_type.String{h.menu_sens_type.Value},num_sens,noise_types{h.menu_monte_synthetic_real_data.Value},amp_mu,locX_mu,locY_mu,locZ_mu,oriAz_mu,oriEl_mu,snr_mu,h.monte_params.plv_range(p),h.edit_num_trials.String,h.monte_params.sim_run_num);
+%                                             [~,real_fname,~]= fileparts(h.monte_real_sensor_files{r});
+%                                            xsname = sprintf('%s_%s%s_SourceAmps_%.f_%.f_%.f_LocX_%.f_%.f_%.f_LocY_%.f_%.f_%.f_LocZ_%.f_%.f_%.f_Az_%.f_%.f_%.f_El_%.f_%.f_%.f_SNR_%.3f_PLV_%.3f_Trials_%s_Run_%.f.mat',...
+%                                                 real_fname,h.menu_sens_type.String{h.menu_sens_type.Value},num_sens,noise_types{h.menu_monte_synthetic_real_data.Value},amp_mu,locX_mu,locY_mu,locZ_mu,oriAz_mu,oriEl_mu,snr_mu,h.monte_params.plv_range(p),h.edit_num_trials.String,h.monte_params.sim_run_num);
+                                            sname = fullfile(h.data_dir,xsname);
+                                            %                                         while exist(sname,'file') % do not overwrite existing file but add run number
+                                            %                                             fprintf('File Exist!  %s\n',sname);
+                                            %                                             h.monte_params.sim_run_num = h.monte_params.sim_run_num+1;
+                                            %                                             xsname = sprintf('%s_%s_Amps_%.f_%.f_%.f_LocX_%.f_%.f_%.f_LocY_%.f_%.f_%.f_LocZ_%.f_%.f_%.f_Az_%.f_%.f_%.f_El_%.f_%.f_%.f_SNR_%.3f_PLV_%.3f_Trials_%s_Run_%.f.mat',...
+                                            %                                                 real_fname,h.menu_sens_type.String{h.menu_sens_type.Value},amp_mu,locX_mu,locY_mu,locZ_mu,oriAz_mu,oriEl_mu,snr_mu,h.monte_params.plv_range(p),h.edit_num_trials.String,h.monte_params.sim_run_num);
+                                            %                                             sname = fullfile(h.data_dir,xsname);
+                                            %                                             fprintf('New File Name = %s\n',sname);
+                                            %                                         end
+                                        else
+                                        end
+                                        
+                                        %% Plotting TFR if selected
+                                        if isfield(h.inv_soln(h.current_inv_soln),'TFR_results')
+                                            h.radio_inv_plot_peak_tfr_connectivity.Value = 1;
+                                        end
+                                        if isfield(h.cfg.source,'TFR_results')
+                                            h.radio_inv_plot_true_tfr_connectivity.Value = 1;
+                                        end
+                                        
+                                        if h.radio_inv_plot_peak_tfr_connectivity.Value == 1
+                                            sm_plot_tfr_connectivity;
+                                        end
+                                        if h.radio_inv_plot_true_tfr_connectivity.Value == 1
+                                            sm_plot_true_tfr_connectivity;
+                                        end
+                                        
+                                        %% Saving dataset
+                                        fprintf('Saving:    %s\n',sname);
+                                        
+                                        sm_saved_monte_results(sname); % Saving selected data
+                                        
+                                        if ~isempty(h.listbox_monte_inv_soln.Value)
+                                            %                                         inv_soln = h.inv_soln;
+                                            %                                         inv_soln = double2single(inv_soln);
+                                            
+                                            %                                         save(sname,'inv_soln','-append');
+                                            %% clearing all inverse solutions to start fresh for next run
+                                            h.listbox_inv_solns.Value = 1:length(h.listbox_inv_solns.String);
+                                            try delete_inv_solns; catch; end
+                                        end
+                                        % clearing true source TFR data
+                                        if isfield(h.cfg.source,'TFR_results')
+                                            h.cfg.source = rmfield(h.cfg.source,'TFR_results');
+                                        end
+                                        
+                                        nn = nn+1; % number of simulations completed
+                                        tot_sims = str2num(h.edit_monte_num_sims.String)*length(h.monte_params.plv_range)*size(h.monte_params.source_loc_range_X,2)*size(h.monte_params.source_ori_range_Az,2)*size(h.monte_params.source_amp_range,2)*length(h.monte_params.SNR_range)*length(h.monte_params.sens_type);
+                                        %                                     wh_prog = nn/tot_sims;
+                                        %                                     hw = waitbar(wh_prog,hw,'Running Monte-Carlo Simulations');
+                                        s = dir(sname);
+                                        filesize = s.bytes/1e6;
+                                        fprintf('Finished Computing & Saving Run: %s\nElapsed Time = %.2f min\t\t     FileSize = %.1f Mb\n',sname, toc(t_start)/60,filesize);
                                     end
-                                    fprintf('Finished Saving\n',sname);
-                                    % clearing true source TFR data
-                                    if isfield(h.cfg.source,'TFR_results')
-                                        h.cfg.source = rmfield(h.cfg.source,'TFR_results');
-                                    end
-                                    
-                                    nn = nn+1; % number of simulations completed
-                                    tot_sims = str2num(h.edit_monte_num_sims.String)*length(h.monte_params.plv_range)*size(h.monte_params.source_loc_range_X,2)*size(h.monte_params.source_ori_range_Az,2)*size(h.monte_params.source_amp_range,2)*length(h.monte_params.SNR_range)*length(h.monte_params.sens_type);
-                                    wh_prog = nn/tot_sims;
-                                    hw = waitbar(wh_prog,hw,'Running Monte-Carlo Simulations');
                                     
                                 end
                             end
@@ -4972,7 +6140,9 @@ for nr = 1:num_reruns
     end
 end
 
-close(hw);
+if exist('hw','var')
+    close(hw);
+end
 
 %% resetting original Amps, Locs, and Oris
 for v = 1:3
@@ -5008,7 +6178,6 @@ else
     h.waitfor_panel.Visible='on';
     h.waitfor_txt.String = sprintf('Simulating M/EEG data. Please wait ...\n'); drawnow;
 end
-
 %% removing original sens data
 if isfield(h.sim_data,'sens_final_org')
     h.sim_data = rmfield(h.sim_data,'sens_final_org');
@@ -5026,9 +6195,10 @@ end
 leadfield = h.anatomy.leadfield;
 % leadfield.H = leadfield.H(h.anatomy.sens.good_sensors,:,:);
 % h.sim_data.sens_sig_data(:,h.anatomy.sens.good_sensors,:) = project_SimSignals(h.sim_data.sig_final,leadfield,h.cfg.source.vx_idx,h.cfg.source.vx_amp,h.cfg.source.vx_ori);
-h.sim_data.sens_sig_data = project_SimSignals(h.sim_data.sig_final,leadfield,h.cfg.source.vx_idx,h.cfg.source.vx_amp,h.cfg.source.vx_ori);
+h.sim_data.sens_sig_data = project_SimSignals(h.sim_data.sig_final,leadfield,h.cfg.source.vx_idx,h.cfg.source.vx_amp,h.cfg.source.vx_ori, h.radio_avgref_leadfields.Value);
 
 combine_sens_data;
+fprintf('Finished Simulating M/EEG sensor data\n');
 
 if h.monte_carlo_flag ~= 1
     h.waitfor_panel.Visible='off'; h.waitfor_txt.String = sprintf('Default Message');
@@ -5036,13 +6206,26 @@ end
 function plot_sens_data(varargin)
 global h
 
+
+%%
 if h.menu_sens_type.Value == 1  %MEG
     wave_clr = h.sens_clr;
+    sens_locs = h.anatomy.sens.chanpos;
 elseif h.menu_sens_type.Value == 2  %EEG
     wave_clr = h.chan_clr;
-elseif h.menu_sens_type.Value == 2  %MEEG
+    sens_locs = h.anatomy.sens.chanpos;
+elseif h.menu_sens_type.Value == 3  %MEEG
     wave_clr = h.meeg_clr;
+    sens_locs = h.anatomy.sens.chanpos;
 end
+
+%% Highlight selected sensors on 3D MRI
+if isfield(h,'sens_selected_scatter'); delete(h.sens_selected_scatter); end
+
+sel_sens = h.listbox_chans.Value;
+h.sens_selected_scatter = scatter3(h.axes_anatomy,sens_locs(sel_sens,1),sens_locs(sel_sens,2),sens_locs(sel_sens,3),'ko',...
+    'MarkerFaceColor','k');
+
 
 try
     
@@ -5051,23 +6234,25 @@ try
     ss = find(h.cfg.study.lat_sim<=h.cfg.study.base_int(1)); bs1=ss(end);
     ss = find(h.cfg.study.lat_sim<=h.cfg.study.base_int(2)); bs2=ss(end); h.cfg.study.base_samps = bs1:bs2;
     v = h.listbox_chans.Value;
-    
+    %          if h.menu_sens_type.Value == 1; sens_convert = 1e15; else; sens_convert = 1e6; end % converting sensor data to femtoT or microV
+    sens_convert = 1;
     if length(v)>1 %  plotting buterfly plot
+        
         %% plot noise
-        data = squeeze(h.sim_data.sens_noise_final(:,v,:)); data = bsxfun(@minus,data,nanmean(data(h.cfg.study.base_samps,:,:)));
+        data = squeeze(h.sim_data.sens_noise_final(:,v,:))*sens_convert; data = bsxfun(@minus,data,nanmean(data(h.cfg.study.base_samps,:,:)));
         h.axes_sens_noise.NextPlot='replace';
         h.plot_noise2 = plot(h.axes_sens_noise,h.cfg.study.lat_sim,squeeze(nanmean(data,3)),'color',wave_clr,'linewidth',1);
         h.axes_sens_noise.YLim = str2num(h.edit_yscale.String); h.axes_sens_noise.XLim = str2num(h.edit_plot_time_int.String);
         h.axes_sens_noise.Title.String = sprintf('Noise'); h.axes_sens_noise.Title.Color = wave_clr*1;
         
         % plot signal
-        data = squeeze(h.sim_data.sens_sig_data(:,v,:)); data = bsxfun(@minus,data,nanmean(data(h.cfg.study.base_samps,:,:)));
+        data = squeeze(h.sim_data.sens_sig_data(:,v,:))*sens_convert; data = bsxfun(@minus,data,nanmean(data(h.cfg.study.base_samps,:,:)));
         h.axes_sens_signal.NextPlot='replace'; h.plot_signal2 = plot(h.axes_sens_signal,h.cfg.study.lat_sim,squeeze(nanmean(data,3)),'color',wave_clr,'linewidth',1);
         h.axes_sens_signal.YLim = str2num(h.edit_yscale.String); h.axes_sens_signal.XLim = str2num(h.edit_plot_time_int.String);
         h.axes_sens_signal.Title.String = sprintf('Signal');  h.axes_sens_signal.Title.Color = wave_clr*1;
         
         % plot final
-        data = squeeze(h.sim_data.sens_final(:,v,:)); data = bsxfun(@minus,data,nanmean(data(h.cfg.study.base_samps,:,:)));
+        data = squeeze(h.sim_data.sens_final(:,v,:))*sens_convert; data = bsxfun(@minus,data,nanmean(data(h.cfg.study.base_samps,:,:)));
         h.axes_sens_final.NextPlot='replace'; h.plot_final2 = plot(h.axes_sens_final,h.cfg.study.lat_sim,squeeze(nanmean(data,3)),'color',wave_clr,'linewidth',1);
         h.axes_sens_final.YLim = str2num(h.edit_yscale.String); h.axes_sens_final.XLim = str2num(h.edit_plot_time_int.String);
         h.axes_sens_final.Title.String = sprintf('Noise+Signal'); h.axes_sens_final.Title.Color = wave_clr*1;
@@ -5076,24 +6261,23 @@ try
         
         if ~isempty(h.topo_lat_samp); plot_topo_line; end
         
-    elseif length(v)==1 %  plotting single channel
-        
+    elseif isscalar(v) %  plotting single channel
         %% plot noise
-        data = squeeze(h.sim_data.sens_noise_final(:,v,:)); data = bsxfun(@minus,data,nanmean(data(h.cfg.study.base_samps,:,:)));
+        data = squeeze(h.sim_data.sens_noise_final(:,v,:))*sens_convert; data = bsxfun(@minus,data,nanmean(data(h.cfg.study.base_samps,:,:)));
         h.axes_sens_noise.NextPlot='replace'; h.plot_noise1 = plot(h.axes_sens_noise,h.cfg.study.lat_sim,data,'color',h.trial_wave_clr);
         h.axes_sens_noise.NextPlot='add'; h.plot_noise2 = plot(h.axes_sens_noise,h.cfg.study.lat_sim,squeeze(nanmean(data,2)),'color',wave_clr,'linewidth',2);
         h.axes_sens_noise.YLim = str2num(h.edit_yscale.String); h.axes_sens_noise.XLim = str2num(h.edit_plot_time_int.String);
         h.axes_sens_noise.Title.String = sprintf('Noise at %s', h.listbox_chans.String{h.listbox_chans.Value}); h.axes_sens_noise.Title.Color = wave_clr*1;
         
         % plot signal
-        data = squeeze(h.sim_data.sens_sig_data(:,v,:)); data = bsxfun(@minus,data,nanmean(data(h.cfg.study.base_samps,:,:)));
+        data = squeeze(h.sim_data.sens_sig_data(:,v,:))*sens_convert; data = bsxfun(@minus,data,nanmean(data(h.cfg.study.base_samps,:,:)));
         h.axes_sens_signal.NextPlot='replace'; h.plot_signal1 = plot(h.axes_sens_signal,h.cfg.study.lat_sim,data,'color',h.trial_wave_clr);
         h.axes_sens_signal.NextPlot='add'; h.plot_signal2 = plot(h.axes_sens_signal,h.cfg.study.lat_sim,squeeze(nanmean(data,2)),'color',wave_clr,'linewidth',2);
         h.axes_sens_signal.YLim = str2num(h.edit_yscale.String); h.axes_sens_signal.XLim = str2num(h.edit_plot_time_int.String);
         h.axes_sens_signal.Title.String = sprintf('Signal at %s', h.listbox_chans.String{h.listbox_chans.Value});  h.axes_sens_signal.Title.Color = wave_clr*1;
         
         % plot final
-        data = squeeze(h.sim_data.sens_final(:,v,:)); data = bsxfun(@minus,data,nanmean(data(h.cfg.study.base_samps,:,:)));
+        data = squeeze(h.sim_data.sens_final(:,v,:))*sens_convert; data = bsxfun(@minus,data,nanmean(data(h.cfg.study.base_samps,:,:)));
         h.axes_sens_final.NextPlot='replace'; h.plot_final1 = plot(h.axes_sens_final,h.cfg.study.lat_sim,data,'color',h.trial_wave_clr);
         h.axes_sens_final.NextPlot='add'; h.plot_final2 = plot(h.axes_sens_final,h.cfg.study.lat_sim,squeeze(nanmean(data,2)),'color',wave_clr,'linewidth',2);
         h.axes_sens_final.YLim = str2num(h.edit_yscale.String); h.axes_sens_final.XLim = str2num(h.edit_plot_time_int.String);
@@ -5108,38 +6292,100 @@ catch me
 end
 function plot_source_data(varargin)
 global h
+%%
+h.edit_yscale_txt.String = ['Y Scale (nA):'];
+v = h.listbox_sources.Value;
+
+%% highlight sources on 3D_mri
+for n=1:length(h.source_locs_patch); h.source_locs_patch(n).LineWidth = 0.5; end
+for vx = v; h.source_locs_patch(vx).LineWidth = 2;end
+
 try
-    h.edit_yscale_txt.String = ['Y Scale (nA):'];
-    
+    %% setting up data for plotting based on source type
     ss = find(h.cfg.study.lat_sim<=h.cfg.study.base_int(1)); bs1=ss(end);
     ss = find(h.cfg.study.lat_sim<=h.cfg.study.base_int(2)); bs2=ss(end); h.cfg.study.base_samps = bs1:bs2;
-    v = h.listbox_sources.Value;
-    % plot prepost
-    data = squeeze(sum(h.sim_data.prepost_wav(:,v,:,:),4)); data = bsxfun(@minus,data,nanmean(data(h.cfg.study.base_samps,:,:)))*str2num(h.edit_source_amp(v).String);
-    h.axes_sens_noise.NextPlot='replace'; h.plot_noise1 = plot(h.axes_sens_noise,h.cfg.study.lat_sim,data,'color',h.trial_wave_clr);
-    h.axes_sens_noise.NextPlot='add'; h.plot_noise2 = plot(h.axes_sens_noise,h.cfg.study.lat_sim,squeeze(nanmean(data,2)),'color',h.src_clr(v,:),'linewidth',2);
+    
+    %     for vx=1:3; source_amp(vx) = str2num(h.edit_source_amp(vx).String); end
+    %     source_amp = source_amp(v);
+    source_amp = h.cfg.source.vx_amp(v);
+    
+    %% Prepost data
+    if isempty(h.sim_data.prepost_wav) || any(v>size(h.sim_data.prepost_wav,2))
+        prepost_data = zeros(size(h.sim_data.sig_final,1), length(v), size(h.sim_data.sig_final,3));
+    else
+        data = h.sim_data.prepost_wav(:,v,:);
+        for vv=1:length(v)
+            prepost_data(:,vv,:) = bsxfun(@minus,data(:,vv,:),nanmean(data(h.cfg.study.base_samps,vv,:)))*source_amp(vv);
+        end
+    end
+    %% Signal Data
+    if isempty(h.sim_data.sig_wav) ||  any(v>size(h.sim_data.sig_wav,2))
+        sig_data = zeros(size(h.sim_data.sig_final,1), length(v), size(h.sim_data.sig_final,3));
+    else
+        data = h.sim_data.sig_wav(:,v,:);
+        for vv=1:length(v)
+            sig_data(:,vv,:) = bsxfun(@minus,data(:,vv,:),nanmean(data(h.cfg.study.base_samps,vv,:)))*source_amp(vv);
+        end
+    end
+    %% Final Data
+    data = h.sim_data.sig_final(:,v,:);
+    for vv=1:length(v)
+        final_data(:,vv,:) = bsxfun(@minus,data(:,vv,:),nanmean(data(h.cfg.study.base_samps,vv,:)))*source_amp(vv);
+    end
+    
+    
+    %% plot prepost
+    h.axes_sens_noise.NextPlot='replace';
+    if length(v)==1
+        h.plot_noise1 = plot(h.axes_sens_noise,h.cfg.study.lat_sim,squeeze(prepost_data),'color',h.trial_wave_clr);
+        h.axes_sens_noise.NextPlot='add';
+    end
+    for vv=1:length(v)
+        h.plot_noise2 = plot(h.axes_sens_noise,h.cfg.study.lat_sim,squeeze(nanmean(prepost_data(:,vv,:),3)),'color',h.cfg.source.src_clr(v(vv),:),'linewidth',2);
+        h.axes_sens_noise.NextPlot='add';
+    end
     h.axes_sens_noise.YLim = str2num(h.edit_yscale.String); h.axes_sens_noise.XLim = str2num(h.edit_plot_time_int.String);
-    h.axes_sens_noise.Title.String = sprintf('Prepost at Simulated Source %.f', v); h.axes_sens_noise.Title.Color = h.src_clr(v,:);
+    h.axes_sens_noise.Title.String = sprintf('Prepost at Simulated Source %s', num2str(v));
+    if length(v)==1; h.axes_sens_noise.Title.Color = h.cfg.source.src_clr(v,:); else; h.axes_sens_noise.Title.Color = 'k'; end
+        h.axes_sens_noise.YLabel.String = 'Amplitude (%/100)';
+
+    %% plot signal
+    h.axes_sens_signal.NextPlot='replace';
     
-    
-    % plot signal
-    data = squeeze(sum(h.sim_data.sig_wav(:,v,:,:),4)); data = bsxfun(@minus,data,nanmean(data(h.cfg.study.base_samps,:,:)))*str2num(h.edit_source_amp(v).String);
-    h.axes_sens_signal.NextPlot='replace'; h.plot_signal1 = plot(h.axes_sens_signal,h.cfg.study.lat_sim,data,'color',h.trial_wave_clr);
-    h.axes_sens_signal.NextPlot='add'; h.plot_signal2 = plot(h.axes_sens_signal,h.cfg.study.lat_sim,squeeze(nanmean(data,2)),'color',h.src_clr(v,:),'linewidth',2);
+    if length(v)==1
+        h.plot_signal1 = plot(h.axes_sens_signal,h.cfg.study.lat_sim,squeeze(sig_data),'color',h.trial_wave_clr);
+        h.axes_sens_signal.NextPlot='add';
+    end
+    for vv=1:length(v)
+        h.plot_signal2 = plot(h.axes_sens_signal,h.cfg.study.lat_sim,squeeze(nanmean(sig_data(:,vv,:),3)),'color',h.cfg.source.src_clr(v(vv),:),'linewidth',2);
+        h.axes_sens_signal.NextPlot='add';
+    end
     h.axes_sens_signal.YLim = str2num(h.edit_yscale.String); h.axes_sens_signal.XLim = str2num(h.edit_plot_time_int.String);
-    h.axes_sens_signal.Title.String = sprintf('Signal at Simulated Source %.f', v); h.axes_sens_signal.Title.Color = h.src_clr(v,:);
+    h.axes_sens_signal.Title.String = sprintf('Signal at Simulated Source %s', num2str(v));
+    if length(v)==1; h.axes_sens_signal.Title.Color = h.cfg.source.src_clr(v,:); else; h.axes_sens_signal.Title.Color = 'k'; end
     
-    % plot final
-    data = squeeze(h.sim_data.sig_final(:,v,:)); data = bsxfun(@minus,data,nanmean(data(h.cfg.study.base_samps,:,:)))*str2num(h.edit_source_amp(v).String);
-    h.axes_sens_final.NextPlot='replace'; h.plot_final1 = plot(h.axes_sens_final,h.cfg.study.lat_sim,data,'color',h.trial_wave_clr);
-    h.axes_sens_final.NextPlot='add'; h.plot_final2 = plot(h.axes_sens_final,h.cfg.study.lat_sim,squeeze(nanmean(data,2)),'color',h.src_clr(v,:),'linewidth',2);
+        h.axes_sens_signal.YLabel.String = 'Amplitude (%/100)';
+
+    %% plot final
+    h.axes_sens_final.NextPlot='replace';
+    
+    if length(v)==1
+        h.plot_final1 = plot(h.axes_sens_final,h.cfg.study.lat_sim,squeeze(final_data),'color',h.trial_wave_clr);
+        h.axes_sens_final.NextPlot='add';
+    end
+    for vv=1:length(v)
+        h.plot_final2 = plot(h.axes_sens_final,h.cfg.study.lat_sim,squeeze(nanmean(final_data(:,vv,:),3)),'color',h.cfg.source.src_clr(v(vv),:),'linewidth',2);
+        h.axes_sens_final.NextPlot='add';
+    end
     h.axes_sens_final.YLim = str2num(h.edit_yscale.String); h.axes_sens_final.XLim = str2num(h.edit_plot_time_int.String);
-    h.axes_sens_final.Title.String = sprintf('PrePost+Signal at Simulated Source %.f', v); h.axes_sens_final.Title.Color = h.src_clr(v,:);
+    h.axes_sens_final.Title.String = sprintf('PrePost+Signal at Simulated Source %s', num2str(v));
+    if length(v)==1; h.axes_sens_final.Title.Color = h.cfg.source.src_clr(v,:); else; h.axes_sens_final.Title.Color = 'k'; end
     
+    %% xlabel
     h.axes_sens_final.XLabel.String = 'Time (sec)'; h.axes_sens_final.YLabel.String = 'Amp (microV)';
     if ~isempty(h.topo_lat_samp); plot_topo_line; end
 catch me
-    
+    %   keyboard
 end
 function update_y_scale(varargin)
 global h
@@ -5221,7 +6467,7 @@ bl_data.hdr.orig =  'Simulated M/EEG from SimMEEG.m';                           
 
 save(fullfile(fpath,fname));  % saves all figure data to be opened as a new study
 h.waitfor_panel.Visible='off'; h.waitfor_txt.String = sprintf('Default Message');
-h.main_fig.Name = fname;
+% h.main_fig.Name = fname;
 
 
 %% Plot Topo
@@ -5230,8 +6476,14 @@ global h
 
 % getting latency for topo
 y_scale = str2num(h.edit_yscale.String);
-axes(h.axes_sens_noise); [x,y,btn] = ginput(1);
-xs = find(h.cfg.study.lat_sim <= x); xs=xs(end)+2;
+% axes(h.axes_sens_noise);
+h.axes_sens_noise.NextPlot = 'replace';
+if h.btn_plot_topo_movie.Value == 0
+    [x,y,btn] = ginput(1);
+    xs = find(h.cfg.study.lat_sim <= x); xs=xs(end)+2;
+else
+    xs = h.topo_movie_samp;
+end
 
 if h.menu_sens_type.Value==1  % MEG
     %     pos = h.anatomy.sens_meg.coilpos(:,:);
@@ -5245,7 +6497,7 @@ elseif h.menu_sens_type.Value==2  % EEG
     pos = pos*1.08;
     val = nanmean(h.sim_data.sens_final(xs,:,:),3);
 end
-
+% val = val(h.anatomy.sens.sens_idx);
 
 h.topo_lat_samp = xs;
 if isfield(h,'topo_lat_line')
@@ -5267,11 +6519,36 @@ else
     plot_topo_line;
 end
 
-plot_3D_mri('on'); % reploting anatomy + sources without scalp 'off' or with scalp 'on'
-axes(h.axes_anatomy);
-h.axes_anatomy.SortMethod='depth';
-ft_plot_topo3d(pos, val,'facealpha',.65);
-get_patch_axes_anatomy(); % get objects for Topo, brain, and scalp for slider transparency
+
+if h.plot_topo_movie_flag == 0  % plotting topography once
+    plot_3D_mri('on'); % reploting anatomy + sources without scalp 'off' or with scalp 'on'
+    axes(h.axes_anatomy);
+    h.axes_anatomy.SortMethod='depth';
+    ft_plot_topo3d(pos, val,'facealpha',.65);
+    get_patch_axes_anatomy(); % get objects for Topo, brain, and scalp for slider transparency
+    
+elseif h.plot_topo_movie_flag == 1
+    %    delete(h.topo_plot_patch);
+    %    ft_plot_topo3d(pos, val,'facealpha',.65);
+    %     % Finding topo patch object for updating data
+    %     pidx = findobj(h.axes_anatomy.Children,'Type','Patch');
+    %     for p=1:length(pidx); if size(pidx(p).Faces,1) == size(h.sim_data.sens_final,2); h.topo_plot_patch = pidx(p); end; end
+    if isvalid(h.topo_plot_patch)
+        h.topo_plot_patch.FaceColor = 'interp';
+        cmap = colormap(h.axes_anatomy);
+        min_max = linspace(h.axes_anatomy.CLim(1), h.axes_anatomy.CLim(2),size(cmap,1));
+        vidx = [];
+        for v=1:length(val)
+            [v_val,vidx(v)] = min( abs(val(v)-min_max));
+        end % finding val indices within collormap
+        val_clr = cmap(vidx,:); % repmat(cmap(vidx,:),[size(h.topo_plot_patch.Faces,2) 1]);
+        h.topo_plot_patch.FaceVertexCData = val_clr;
+        h.topo_plot_patch.FaceAlpha = h.slider_transparency_topo.Value;
+        %         h.topo_plot_patch.CDataMapping = 'scaled';
+        %         h.topo_plot_patch.FaceAlpha = h.slider_transparency_topo.Value
+    end
+end
+
 
 set_topo_caxis;
 
@@ -5335,6 +6612,36 @@ end
 
 h.topo_scale = y_scale*h.slider_topo_scale.Value;
 h.axes_anatomy.CLim = h.topo_scale;
+function run_topo_data_movie(varargin)
+global h
+
+if h.btn_plot_topo_movie.Value == 1 % start timer for plotting of top movie
+    x = find(h.cfg.study.lat_sim<=h.axes_sens_final.XLim(1)); xs(1) = x(end);
+    x = find(h.cfg.study.lat_sim<=h.axes_sens_final.XLim(2)); xs(2) = x(end);
+    h.topo_plot_time_samps =  xs(1):xs(end);
+    h.topo_movie_samp = h.topo_plot_time_samps(1);   % reset and start at first time point
+    h.plot_topo_movie_flag = 1;
+    if strcmpi(h.timer_plot_topo_movie.Running,'off')
+        start(h.timer_plot_topo_movie);
+    else
+        stop(h.timer_plot_topo_movie); start(h.timer_plot_topo_movie);
+    end
+    
+elseif h.btn_plot_topo_movie.Value == 0 % stop timer for plotting of top movie
+    h.plot_topo_movie_flag = 0;
+    stop(h.timer_plot_topo_movie)
+end
+
+function plot_topo_data_movie(varargin)
+global h
+if h.topo_movie_samp >= h.topo_plot_time_samps(end)
+    h.topo_movie_samp = h.topo_plot_time_samps(1);
+else
+    h.topo_movie_samp = h.topo_movie_samp+1;     % next sample to plot topo
+end
+plot_topo_data();
+
+
 
 
 %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -5772,6 +7079,7 @@ h2.UserData.source_locs = h.cfg.study.source_locs;
 h2.UserData.source_locs_mm = h.cfg.study.source_locs_mm;
 for v=1:3; h.edit_source_locs(v).String = sprintf('%.1f %.1f %.1f', h.cfg.study.source_locs_mm(v,:)); end
 update_slices; update_source_data(); %plot_3D_mri();
+plot_3D_mri(); figure(101); 
 
 % h.tab_power.Visible='on';
 %% Plot source_locs_mm in 3D volume "vol"

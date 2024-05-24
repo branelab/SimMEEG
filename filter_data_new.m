@@ -44,7 +44,7 @@ if nargin==2 % for filtering data only
 elseif nargin<9; FilterOrder=[]; plot_filter_flag=0;
 elseif nargin<10; plot_filter_flag=0;
 end
-try
+% try
     
     if isempty(filt_design)  % design a filter --> "filt_design"
 %         fprintf('Generating a filter design\n');
@@ -258,7 +258,7 @@ try
             catch
 %                 fprintf('WARNING! data length is too small for filter.\nPadding with zeros at beginning and end of data before filtering\n');
                 min_size=3*size(filt_design.Coefficients,2);
-                num_reps=ceil(min_size/size(data,1))/2;
+                num_reps=ceil((min_size/size(data,1))/2);
 %                  fprintf('WARNING! data length is too small for filter.\nPadding with %.f zeros at beginning and end of data before filtering\n',size(data,1)*num_reps);
                y=cat(1,zeros(size(data,1)*num_reps,size(data,2),size(data,3)),data,zeros(size(data,1)*num_reps,size(data,2),size(data,3)));
                 y=filtfilt(filt_design,double(y));
@@ -285,9 +285,9 @@ try
         end
     end
     
-catch
-    fprintf('WARNING! Filter properties are not set properly.\nPlease make sure the "filt_type" and "filt_method" align\n');
-end
+% catch
+%     fprintf('WARNING! Filter properties are not set properly.\nPlease make sure the "filt_type" and "filt_method" align\n');
+% end
 
 return
 

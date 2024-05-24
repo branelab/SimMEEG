@@ -4,7 +4,7 @@ function [data,ref_data]=bl_reref(data,ref_chans,ex_chans,bl_flag)
 %
 %
 % INPUT
-%   data = [chans x samples x trials]
+%   data = [samples x chans x  trials]
 %   ref_chans = indices for ref channels
 %   ex_chans = indices for excluding channels
 %   bl_flag = (1) [default] use BRANE Lab's simple re-referencing (0) use EEGLab's re-referencing
@@ -12,13 +12,13 @@ function [data,ref_data]=bl_reref(data,ref_chans,ex_chans,bl_flag)
 if nargin<4
     bl_flag=1;
 end
-in_chans=setdiff(1:size(data,1),ex_chans);
+in_chans=setdiff(1:size(data,2),ex_chans);
 
 if bl_flag==1
-    % simple re-referencing function --> not using other's programs
-    ref_data=nanmean(data(ref_chans,:,:),1);
-    % simple subtraction - This returns exactly the same as Field Trip's ft_preprocessing.m function.
-    data(in_chans,:,:)=bsxfun(@minus,data(in_chans,:,:),ref_data);
+% simple re-referncing function --> not using other's programs
+ref_data=mean(data(:,ref_chans,:),2);
+% simple subtraction - This returns exactly the same as Field Trip's ft_preprocessing.m function.
+data(:,in_chans,:)=bsxfun(@minus,data(:,in_chans,:),ref_data);
     
 elseif bl_flag==0
     % EEG Lab's rereferencing calculations

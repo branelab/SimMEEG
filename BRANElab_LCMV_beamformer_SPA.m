@@ -39,8 +39,8 @@ function [SPA]=BRANElab_LCMV_beamformer_SPA(H,data,act_samps,ctrl_samps,loc_flag
 %% beamformer based on following equation
 %   W = R^-1 * H * ( H' * R^-1 * H)^-1    , where R = covariance matrix [sensor x sensor] and H = Ledfield [sensor x voxel].
 
-
 fprintf('Performing Single-Source beamforming\n');
+SPA = [];
 
 %% LCMV
 % calculating covarince matrices for signal+noise (Rinv) and noise (Ninv
@@ -48,7 +48,6 @@ xs=round(size(ctrl_samps,2)/2);
 
 %% checking rank of data. If it doesn't match the num_chans then white noise will be added until rank sufficient.
 R=[]; t=0;
-% r2=rank(squeeze(data(:,:,1)));
 [R,~,~,~,~,~]=BRANELab_calc_cov(data,act_samps,ctrl_samps(xs+1:end));
 r2=rank(R);
 xstd=min(min(std(data)))/size(data,2);
@@ -58,17 +57,17 @@ while r2<size(H,1)
     [R,~,~,~,~,~]=BRANELab_calc_cov(data,act_samps,ctrl_samps(xs+1:end));
     r2=rank(R);
     fprintf('Rank = %.f\tChannel Count=%.f\n',r2,size(data,2));
-    if 100*(t*xstd)/max(max(std(data)))>10; fprintf('WARNING! Insufficient Rank in Data or Data is empty\n'); SPA=[]; return; end % stopping infinite loop if added noise exceeds 10%
+    if 100*(t*xstd)/max(max(std(data)))>10; fprintf('WARNING! Insufficient Rank in Data or Data is empty\n'); MIA=[]; return; end % stopping infinite loop
     % fprintf('Rank = %.f\n',r2);
     fprintf('Percent white noise added for sufficient rank = %.3f %%\n\n',100*(t*xstd)/max(max(std(data))));
 end
 
+%% Data Covariance 
 %[R,N,Rbar,Nbar,Rinv,Ninv]=BRANELab_calc_cov(data,act_samps,ctrl_samps);
 [R,N,Rbar,Nbar,Rinv,Ninv]=BRANELab_calc_cov(data,act_samps,ctrl_samps(xs+1:end));
 RNcov.R=R; RNcov.Rinv=Rinv; RNcov.Rbar=Rbar; RNcov.N=N; RNcov.Ninv=Ninv; RNcov.Nbar=Nbar; 
 
-H_idx=1:size(H,3); [wts,Hscalar,ori,P]=bl_lcmv_scalar_v4(H,H_idx,[],RNcov,[],loc_flag);
-
+H_idx=1:size(H,3); [wts,Hscalar,ori,P]=bl_lcmv_scalar_v5(H,H_idx,[],RNcov,[],loc_flag);
 
 %%  Noise estimate from control samples
 % splitting ctrl interval in half to calculate null distribution of noise
@@ -84,7 +83,7 @@ elseif loc_flag==3; Rx=nN; Nx=nR; bm_type2='acitvity_index'; % pseudoZ_er2
 end
 
 % First calculation of noise - like SPA
-H_idx=1:size(H,3); [~,~,~,nP]=bl_lcmv_scalar_v4(H,H_idx,[],nRNcov,[],loc_flag);
+H_idx=1:size(H,3); [~,~,~,nP]=bl_lcmv_scalar_v5(H,H_idx,[],nRNcov,[],loc_flag);
 nd=sort(nP.img); null_thresh=nd(ceil(length(nd)*noise_alpha));
 
 % OUTPUTS

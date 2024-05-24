@@ -1,4 +1,4 @@
-function p=bl_plot_mesh(vol,opt)
+function p=bl_plot_mesh(vol,opt, haxis)
 % function bl_plot_mesh(vol,opt);
 % This plots the vol data from field trip using 'patch'. It also removes
 % dependencies on Field Trip's tools that throw errors due to% compatibility 
@@ -25,8 +25,11 @@ function p=bl_plot_mesh(vol,opt)
 %
 
 % set default 'opt' options
-if nargin<2 
+if nargin<2  || isempty(opt)
     opt.vol_nums=1:length(vol);     % indices of volumes within vol to plot
+    haxis = gca;
+elseif nargin<3
+    haxis = gca;
 end
 % checking for options and setting default if they don't exist
 for v=1:length(vol)
@@ -41,7 +44,7 @@ end
 for v=opt.vol_nums
     if isfield(vol(v),'img') && ~isempty(vol(v).img)
         if size(vol(v).pos,1)==length(vol(v).img)
-            p(v)=patch('Faces',vol(v).tri,'Vertices',vol(v).pos,'FaceVertexCData',vol(v).img,'FaceColor','interp','FaceAlpha',vol(v).FaceAlpha,'EdgeColor',vol(v).EdgeColor,'EdgeAlpha',vol(v).EdgeAlpha);
+            p(v)=patch(haxis, 'Faces',vol(v).tri,'Vertices',vol(v).pos,'FaceVertexCData',vol(v).img,'FaceColor','interp','FaceAlpha',vol(v).FaceAlpha,'EdgeColor',vol(v).EdgeColor,'EdgeAlpha',vol(v).EdgeAlpha);
             
             if isfield(opt,'min_max')
                 min_max=opt.min_max;
@@ -54,19 +57,19 @@ for v=opt.vol_nums
                 alpha_scale=linspace(0,1,1000);
                 min_img=min_max(1)/min_max(2);
                 alpha_scale(alpha_scale<min_img)=0;
-                alpha('color'); alphamap(alpha_scale);
-                shading interp;
-                caxis(min_max)
+                alpha(haxis,'color'); alphamap(haxis,alpha_scale);
+                shading(haxis,'interp');
+                haxis.CLim = min_max;
             end
             
         else
             fprintf('ERROR! Size of img and vertices/pos do NOT match. Only plotting vol data\n');
-            p(v)=patch('Faces',vol(v).tri,'Vertices',vol(v).pos,'FaceColor',vol(v).FaceColor,'FaceAlpha',vol(v).FaceAlpha,'EdgeColor',vol(v).EdgeColor,'EdgeAlpha',vol(v).EdgeAlpha);
+            p(v)=patch(haxis,'Faces',vol(v).tri,'Vertices',vol(v).pos,'FaceColor',vol(v).FaceColor,'FaceAlpha',vol(v).FaceAlpha,'EdgeColor',vol(v).EdgeColor,'EdgeAlpha',vol(v).EdgeAlpha);
         end
     else
-        p(v)=patch('Faces',vol(v).tri,'Vertices',vol(v).pos,'FaceColor',vol(v).FaceColor,'FaceAlpha',vol(v).FaceAlpha,'EdgeColor',vol(v).EdgeColor,'EdgeAlpha',vol(v).EdgeAlpha);
+        p(v)=patch(haxis,'Faces',vol(v).tri,'Vertices',vol(v).pos,'FaceColor',vol(v).FaceColor,'FaceAlpha',vol(v).FaceAlpha,'EdgeColor',vol(v).EdgeColor,'EdgeAlpha',vol(v).EdgeAlpha);
     end
 end
-axis off;
-material dull; 
+axis(haxis,'off');
+material(haxis,'dull'); 
 

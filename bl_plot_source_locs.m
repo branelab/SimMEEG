@@ -23,7 +23,8 @@ if ~isfield(opt,'source_clr')
     opt.source_clr=[0 0 1; 1 0 0; 0 0.8 0]; % default 
 end
 if ~isfield(opt,'source_size')
-    opt.source_size=[100 100 100]; % default 
+%     opt.source_size=[100 100 100]; % default 
+    opt.source_size=repmat(100,size(source_locs_mm,1),1); % default 
 end
 if ~isfield(opt,'axes_h')
     figure; set(gcf,'color','w'); cla; ax=gca;
@@ -36,8 +37,8 @@ else
 end
 
 axes(opt.axes_h); cla;
-for v=1:3
-s1=scatter3(source_locs_mm(v,1),source_locs_mm(v,2),source_locs_mm(v,3),'MarkerFaceColor',opt.source_clr(v,:),'MarkerEdgeColor',opt.source_clr(v,:)*.3,'SizeData',opt.source_size(v));
+for v=1:size(source_locs_mm,1)
+s1(v)=scatter3(source_locs_mm(v,1),source_locs_mm(v,2),source_locs_mm(v,3),'MarkerFaceColor',opt.source_clr(v,:),'MarkerEdgeColor',opt.source_clr(v,:)*.3,'SizeData',opt.source_size(v));
 end
 hold on;
 p=bl_plot_mesh(vol,opt);

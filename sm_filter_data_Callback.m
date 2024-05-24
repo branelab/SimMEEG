@@ -3,6 +3,7 @@ global h
 
 %% Need to check to make sure FieldTrip's external directory with filtfilt messes up BRANE Lab's filter_data_new.m function need to remove this directory when filtering
 % rmpath(h.FieldTrip_dir_external);
+h.btn_reref_EEG.Value = 0; % turn this off because filtering is done on original sens_final data
 
 % combine_sens_data;
 if h.monte_carlo_flag == 1
@@ -43,11 +44,13 @@ switch varargin{1}.String
             if ~isempty(h.filt_design)
                 if ~isfield(h.sim_data,'sens_final_org'); h.sim_data.sens_final_org = h.sim_data.sens_final; end
                 if ~isfield(h.sim_data,'sens_noise_final_org'); h.sim_data.sens_noise_final_org = h.sim_data.sens_noise_final; end
-                if ~isfield(h.sim_data,'sens_sig_data_org'); h.sim_data.sens_sig_data_org = h.sim_data.sens_sig_data; end;
+                if ~isfield(h.sim_data,'sens_sig_data_org'); h.sim_data.sens_sig_data_org = h.sim_data.sens_sig_data; end
                 if ~isfield(h.sim_data,'sig_final_org'); h.sim_data.sig_final_org = h.sim_data.sig_final; end
                 
+                h.sim_data.sens_final_org(isnan(h.sim_data.sens_final_org)) = 0; 
+                
                 [~,h.sim_data.sens_final(:,h.anatomy.sens.good_sensors,:)] = filter_data_new(h.filt_design,double(h.sim_data.sens_final_org(:,h.anatomy.sens.good_sensors,:)));
-                [~,h.sim_data.sens_noise_final(:,h.anatomy.sens.good_sensors,:)] = filter_data_new(h.filt_design,double(h.sim_data.sens_noise_final_org(:,h.anatomy.sens.good_sensors,:)));
+                [~,h.sim_data.sens_noise_final(:,h.anatomy.sens.good_sensors,:)] = filter_data_new(h.filt_design,double(h.sim_data.sens_noise_final_org(:,h.anatomy.sens.good_sensors,:)) );
                 [~,h.sim_data.sens_sig_data(:,h.anatomy.sens.good_sensors,:)] = filter_data_new(h.filt_design,double(h.sim_data.sens_sig_data_org(:,h.anatomy.sens.good_sensors,:)));
                 [~,h.sim_data.sig_final] = filter_data_new(h.filt_design,double(h.sim_data.sig_final_org));
             else

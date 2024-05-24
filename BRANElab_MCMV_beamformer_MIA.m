@@ -140,7 +140,7 @@ nRNcov.R=nR; nRNcov.Rinv=nRinv; nRNcov.Rbar=nRbar; nRNcov.N=nN; nRNcov.Ninv=nNin
 % alpha_level=.99;
 % null_thresh=null_dist(ceil( (alpha_level)*size(null_dist,1)));
 
-% H_idx=1: size(H,3); [~,~,~,nP]=bl_lcmv_scalar_v4(H,H_idx,[],nRNcov,[],loc_flag);
+% H_idx=1: size(H,3); [~,~,~,nP]=bl_lcmv_scalar_v5(H,H_idx,[],nRNcov,[],loc_flag);
 % nd=sort(abs(nP.img)); null_thresh=nd(ceil(length(nd)*noise_alpha));
 
 fprintf('Running iterations. Please be patient ...\n');
@@ -160,10 +160,10 @@ while mm~=0
         
         % loop through "bl_lcmv_scalar" fucntion until maximal signal across all peak voxels are maximum???.
         %         keyboard;
-        H_idx=1: size(H,3); [~,Hscalar2,ori,P2]=bl_lcmv_scalar_v4(H,H_idx,Href,RNcov,ref_idx,loc_flag);
+        H_idx=1: size(H,3); [~,Hscalar2,ori,P2]=bl_lcmv_scalar_v5(H,H_idx,Href,RNcov,ref_idx,loc_flag);
         
         % iteratively updating noise to include Href
-        H_idx=1: size(H,3); [~,~,~,nP]=bl_lcmv_scalar_v4(H,H_idx,Href,nRNcov,ref_idx,loc_flag);
+        H_idx=1: size(H,3); [~,~,~,nP]=bl_lcmv_scalar_v5(H,H_idx,Href,nRNcov,ref_idx,loc_flag);
         %         nd=sort(nP.img(~isnan(nP.img)));  null_thresh(sn)=nd(ceil(length(nd)*noise_alpha));
         nd=sort(abs(nP.img(~isnan(nP.img)))); nd=nd(nd~=0);  null_thresh(sn)=nd(ceil(length(nd)*(1-noise_alpha)));
         
@@ -240,7 +240,7 @@ while mm~=0
             slice_orient=[1 1 1]; sFaceAlpha=.5; vx_locs=anatomy.leadfield.voxel_pos;
             inside_idx=find(anatomy.leadfield.inside==1);
             vol_types=3; grid_locs=anatomy.leadfield.pos;
-            vol=anatomy.vol.bnd(end); opt.vol_nums=1; vol.FaceColor=[.6 .6 .6]; vol.FaceAlpha=0.3; vol.EdgeColor='none';
+            vol=anatomy.headmodel.bnd(end); opt.vol_nums=1; vol.FaceColor=[.6 .6 .6]; vol.FaceAlpha=0.3; vol.EdgeColor='none';
             %             bl_plot_mesh(vol,opt); bl_plot_mesh(vol)
             
             slice_orient=[1 1 1]; sFaceAlpha=.5; vx_locs=anatomy.leadfield.voxel_pos;
@@ -253,17 +253,17 @@ while mm~=0
             
             % Active Int map
             nthresh=(1-1e-10)*max(abs(img1));   % only finding next largest peak to speed up plotting;
-            subplot(3,4,1); cla; bl_plot_lcmv_peak_img_FT_new(img1,ori,nthresh,15,vx_locs,cmap,min_max1,vol,[],[0 90],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
+            subplot(3,4,1); cla; haxis = gca; bl_plot_lcmv_peak_img_FT_new(haxis, img1,ori,nthresh,15,vx_locs,cmap,min_max1,vol,[],[0 90],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
             mrk_size=150; s1=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'k+','sizedata',mrk_size,'linewidth',1); s2=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'ks','sizedata',mrk_size,'linewidth',4);
             mrk_size=150; s1=scatter3(vx_locs(xref(sn),1),vx_locs(xref(sn),2),vx_locs(xref(sn),3),'g+','sizedata',mrk_size,'linewidth',1); s2=scatter3(vx_locs(xref(sn),1),vx_locs(xref(sn),2),vx_locs(xref(sn),3),'gs','sizedata',mrk_size,'linewidth',4);
             if sn>2; mrk_size=150; s1=scatter3(vx_locs(xref(sn-1),1),vx_locs(xref(sn-1),2),vx_locs(xref(sn-1),3),'+','sizedata',mrk_size,'linewidth',1,'markeredgecolor',[1 0 1]); s2=scatter3(vx_locs(xref(sn-1),1),vx_locs(xref(sn-1),2),vx_locs(xref(sn-1),3),'s','sizedata',mrk_size,'linewidth',4,'markeredgecolor',[1 0 1]); end
             px=get(gca,'position'); a1=axes('position',[px(1)-.05 px(2) .015 px(4)]); plot_colorbar(a1,min_max1,cmap,0)
-            subplot(3,4,2); cla; bl_plot_lcmv_peak_img_FT_new(img1,ori,nthresh,15,vx_locs,cmap,min_max1,vol,[],[0 0],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
+            subplot(3,4,2); cla; haxis = gca; bl_plot_lcmv_peak_img_FT_new(haxis, img1,ori,nthresh,15,vx_locs,cmap,min_max1,vol,[],[0 0],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
             mrk_size=150; s1=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'k+','sizedata',mrk_size,'linewidth',1); s2=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'ks','sizedata',mrk_size,'linewidth',4);
             mrk_size=150; s1=scatter3(vx_locs(xref(sn),1),vx_locs(xref(sn),2),vx_locs(xref(sn),3),'g+','sizedata',mrk_size,'linewidth',1); s2=scatter3(vx_locs(xref(sn),1),vx_locs(xref(sn),2),vx_locs(xref(sn),3),'gs','sizedata',mrk_size,'linewidth',4);
             if sn>2; mrk_size=150; s1=scatter3(vx_locs(xref(sn-1),1),vx_locs(xref(sn-1),2),vx_locs(xref(sn-1),3),'+','sizedata',mrk_size,'linewidth',1,'markeredgecolor',[1 0 1]); s2=scatter3(vx_locs(xref(sn-1),1),vx_locs(xref(sn-1),2),vx_locs(xref(sn-1),3),'s','sizedata',mrk_size,'linewidth',4,'markeredgecolor',[1 0 1]); end
             title(sprintf('Active Interval map (Current Peak Voxel=%.f Value=%.3f)',xref(sn),img1(xref(sn))),'color',[0 .6 0]);
-            subplot(3,4,3); cla; bl_plot_lcmv_peak_img_FT_new(img1,ori,nthresh,15,vx_locs,cmap,min_max1,vol,[],[-90 0],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
+            subplot(3,4,3); cla; haxis = gca; bl_plot_lcmv_peak_img_FT_new(haxis, img1,ori,nthresh,15,vx_locs,cmap,min_max1,vol,[],[-90 0],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
             mrk_size=150; s1=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'k+','sizedata',mrk_size,'linewidth',1); s2=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'ks','sizedata',mrk_size,'linewidth',4);
             mrk_size=150; s1=scatter3(vx_locs(xref(sn),1),vx_locs(xref(sn),2),vx_locs(xref(sn),3),'g+','sizedata',mrk_size,'linewidth',1); s2=scatter3(vx_locs(xref(sn),1),vx_locs(xref(sn),2),vx_locs(xref(sn),3),'gs','sizedata',mrk_size,'linewidth',4);
             if sn>2; mrk_size=150; s1=scatter3(vx_locs(xref(sn-1),1),vx_locs(xref(sn-1),2),vx_locs(xref(sn-1),3),'+','sizedata',mrk_size,'linewidth',1,'markeredgecolor',[1 0 1]); s2=scatter3(vx_locs(xref(sn-1),1),vx_locs(xref(sn-1),2),vx_locs(xref(sn-1),3),'s','sizedata',mrk_size,'linewidth',4,'markeredgecolor',[1 0 1]); end
@@ -271,15 +271,15 @@ while mm~=0
             
             % Control Int map
             nthresh=(1-1e-10)*max(abs(img2));
-            subplot(3,4,5); cla; [~,pidx2]=bl_plot_lcmv_peak_img_FT_new(img2,ori,nthresh,15,vx_locs,cmap,min_max2,vol,[],[0 90],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
+            subplot(3,4,5); cla; haxis = gca; [~,pidx2]=bl_plot_lcmv_peak_img_FT_new(haxis, img2,ori,nthresh,15,vx_locs,cmap,min_max2,vol,[],[0 90],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
             mrk_size=150; s1=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'k+','sizedata',mrk_size,'linewidth',1); s2=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'ks','sizedata',mrk_size,'linewidth',4);
             mrk_size=150; s1=scatter3(vx_locs(pidx2(1),1),vx_locs(pidx2(1),2),vx_locs(pidx2(1),3),'+','sizedata',mrk_size,'linewidth',1,'markeredgecolor',[1 0 0]); s2=scatter3(vx_locs(pidx2(1),1),vx_locs(pidx2(1),2),vx_locs(pidx2(1),3),'s','sizedata',mrk_size,'linewidth',4,'markeredgecolor',[1 0 0]);
             px=get(gca,'position'); a1=axes('position',[px(1)-.05 px(2) .015 px(4)]); plot_colorbar(a1,min_max2,cmap,0)
-            subplot(3,4,6); cla; bl_plot_lcmv_peak_img_FT_new(img2,ori,nthresh,15,vx_locs,cmap,min_max2,vol,[],[0 0],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
+            subplot(3,4,6); cla; haxis = gca; bl_plot_lcmv_peak_img_FT_new(haxis, img2,ori,nthresh,15,vx_locs,cmap,min_max2,vol,[],[0 0],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
             mrk_size=150; s1=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'k+','sizedata',mrk_size,'linewidth',1); s2=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'ks','sizedata',mrk_size,'linewidth',4);
             mrk_size=150; s1=scatter3(vx_locs(pidx2(1),1),vx_locs(pidx2(1),2),vx_locs(pidx2(1),3),'+','sizedata',mrk_size,'linewidth',1,'markeredgecolor',[1 0 0]); s2=scatter3(vx_locs(pidx2(1),1),vx_locs(pidx2(1),2),vx_locs(pidx2(1),3),'s','sizedata',mrk_size,'linewidth',4,'markeredgecolor',[1 0 0]);
             title(sprintf('Control Interval map (Current Peak Voxel=%.f Value=%.3f)',pidx2(1),img2(pidx2(1))),'color',[1 0 0]);
-            subplot(3,4,7); cla; bl_plot_lcmv_peak_img_FT_new(img2,ori,nthresh,15,vx_locs,cmap,min_max2,vol,[],[-90 0],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
+            subplot(3,4,7); cla; haxis = gca; bl_plot_lcmv_peak_img_FT_new(haxis, img2,ori,nthresh,15,vx_locs,cmap,min_max2,vol,[],[-90 0],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
             mrk_size=150; s1=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'k+','sizedata',mrk_size,'linewidth',1); s2=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'ks','sizedata',mrk_size,'linewidth',4);
             mrk_size=150; s1=scatter3(vx_locs(pidx2(1),1),vx_locs(pidx2(1),2),vx_locs(pidx2(1),3),'+','sizedata',mrk_size,'linewidth',1,'markeredgecolor',[1 0 0]); s2=scatter3(vx_locs(pidx2(1),1),vx_locs(pidx2(1),2),vx_locs(pidx2(1),3),'s','sizedata',mrk_size,'linewidth',4,'markeredgecolor',[1 0 0]);
             if length(z)>1; subplot(3,4,8); cla; hold on; plot(z); plot(nz); axis([1 length(z) 0 max(z)*1.2]); plot([1 length(z)],[null_thresh(sn) null_thresh(sn)],'k--'); legend({'Act Z' 'Ctrl Z' 'Null Thresh'},'Location','best'); title('Inner Loop PseudoZ for refs'); end
@@ -287,18 +287,19 @@ while mm~=0
             
             % SNR map
             nthresh=(1-1e-10)*max(abs(img3));
-            subplot(3,4,9); cla; [~,pidx2]=bl_plot_lcmv_peak_img_FT_new(img3,ori,nthresh,15,vx_locs,cmap,min_max3,vol,[],[0 90],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
+            subplot(3,4,9); cla; haxis = gca; [~,pidx2]=bl_plot_lcmv_peak_img_FT_new(haxis, img3,ori,nthresh,15,vx_locs,cmap,min_max3,vol,[],[0 90],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
             mrk_size=150; s1=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'k+','sizedata',mrk_size,'linewidth',1); s2=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'ks','sizedata',mrk_size,'linewidth',4);
             mrk_size=150; s1=scatter3(vx_locs(pidx2(1),1),vx_locs(pidx2(1),2),vx_locs(pidx2(1),3),'w+','sizedata',mrk_size,'linewidth',1); s2=scatter3(vx_locs(pidx2(1),1),vx_locs(pidx2(1),2),vx_locs(pidx2(1),3),'ws','sizedata',mrk_size,'linewidth',4);
             px=get(gca,'position'); a1=axes('position',[px(1)-.05 px(2) .015 px(4)]); plot_colorbar(a1,min_max3,cmap,0)
-            subplot(3,4,10); cla; bl_plot_lcmv_peak_img_FT_new(img3,ori,nthresh,15,vx_locs,cmap,min_max3,vol,[],[0 0],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
+            subplot(3,4,10); cla; haxis = gca; bl_plot_lcmv_peak_img_FT_new(haxis, img3,ori,nthresh,15,vx_locs,cmap,min_max3,vol,[],[0 0],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
             mrk_size=150; s1=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'k+','sizedata',mrk_size,'linewidth',1); s2=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'ks','sizedata',mrk_size,'linewidth',4);
             mrk_size=150; s1=scatter3(vx_locs(pidx2(1),1),vx_locs(pidx2(1),2),vx_locs(pidx2(1),3),'w+','sizedata',mrk_size,'linewidth',1); s2=scatter3(vx_locs(pidx2(1),1),vx_locs(pidx2(1),2),vx_locs(pidx2(1),3),'ws','sizedata',mrk_size,'linewidth',4);
             title('Active-Control map','color',[1 1 1]*0);
-            subplot(3,4,11); cla; bl_plot_lcmv_peak_img_FT_new(img3,ori,nthresh,15,vx_locs,cmap,min_max3,vol,[],[-90 0],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
+            subplot(3,4,11); cla; haxis = gca; bl_plot_lcmv_peak_img_FT_new(haxis, img3,ori,nthresh,15,vx_locs,cmap,min_max3,vol,[],[-90 0],1,vol_types,grid_locs,inside_idx,slice_orient,sFaceAlpha);
             mrk_size=150; s1=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'k+','sizedata',mrk_size,'linewidth',1); s2=scatter3(vx_locs(mref,1),vx_locs(mref,2),vx_locs(mref,3),'ks','sizedata',mrk_size,'linewidth',4);
             mrk_size=150; s1=scatter3(vx_locs(pidx2(1),1),vx_locs(pidx2(1),2),vx_locs(pidx2(1),3),'w+','sizedata',mrk_size,'linewidth',1); s2=scatter3(vx_locs(pidx2(1),1),vx_locs(pidx2(1),2),vx_locs(pidx2(1),3),'ws','sizedata',mrk_size,'linewidth',4);
             if nqloop>1 && length(z9)>1;  subplot(3,4,12); cla; hold on; plot(z9); plot(nz9); axis([1 length(z) 0 max(z9)*1.2]);             plot([1 length(z9)],[null_thresh2(end) null_thresh2(end)],'k--'); legend({'Act Z' 'Ctrl Z' 'Null Thresh'},'Location','best'); title('Outer Loop PseudoZ for refs'); end
+        drawnow
         end
         %%
         if text_flag==1; fprintf('\nIteration = %.f\tPeak Voxel#:%.f (ori=%.3f %.3f %.3f) \n%s=%.4f Active=%.4f Theshold=%.4f Control =%.4f pseudoSNR = %.4f Percent improved=%.2f\n',zz,xref(sn),ori(xref(sn),1),ori(xref(sn),2),ori(xref(sn),3),bm_type,pmax(sn),zk(sn),null_thresh(sn),nzk(sn),zk(sn)/nzk(sn),perc_imp); end
@@ -350,18 +351,18 @@ while mm~=0
     
     %     %%% finding best Lead-field when accounting for all found sources.
     %     if length(mref)>1;
-    %         [~,mH]=bl_lcmv_scalar_v4(H,mref,[],RNcov,[],loc_flag);
+    %         [~,mH]=bl_lcmv_scalar_v5(H,mref,[],RNcov,[],loc_flag);
     %         mHref2=mH(:,mref);
     %         %wts_MCMV=zeros(size(wts2));
     %         for v=1:size(mref,2);
     %              H_idx=mref(v);
     %             r_idx=setdiff(1:size(mref,2),v); %selecting all other leadfield for nulling
-    %             [~,mH,mori,P3]=bl_lcmv_scalar_v4(H,H_idx,mHref2(:,r_idx),RNcov,mref(r_idx),loc_flag);
+    %             [~,mH,mori,P3]=bl_lcmv_scalar_v5(H,H_idx,mHref2(:,r_idx),RNcov,mref(r_idx),loc_flag);
     %              mHscalar=mH(:,H_idx); ori_MCMV(v,:)=mori(H_idx,:);
     %             mHref(:,v)=mHscalar;
     %         end
     %     elseif  length(mref)==1;
-    %          [~,mH,mori,~]=bl_lcmv_scalar_v4(H,mref,[],RNcov,[],loc_flag);
+    %          [~,mH,mori,~]=bl_lcmv_scalar_v5(H,mref,[],RNcov,[],loc_flag);
     %      mHref(:,1)=mH(:,mref); ori_MCMV(1,:)=mori(mref,:);
     %     elseif  isempty(mref);
     %         fprintf('WARNING! No sources found!\n');
@@ -408,7 +409,7 @@ while mm~=0
     end
     
     % iteratively updating noise to include mHref
-    H_idx=1: size(H,3); [~,~,~,nP]=bl_lcmv_scalar_v4(H,H_idx,mHref,nRNcov,mref,loc_flag);
+    H_idx=1: size(H,3); [~,~,~,nP]=bl_lcmv_scalar_v5(H,H_idx,mHref,nRNcov,mref,loc_flag);
     nd=sort(abs(nP.img(~isnan(nP.img)))); nd=nd(nd~=0); null_thresh2(nqloop)=nd(ceil(length(nd)*(1-noise_alpha)));
     
     r_idx=find(z9>null_thresh2(nqloop)); % MPZ
@@ -425,18 +426,18 @@ m=0;
 while m==0
     
     if length(mref)>1
-        [~,mH]=bl_lcmv_scalar_v4(H,mref,[],RNcov,[],loc_flag);
+        [~,mH]=bl_lcmv_scalar_v5(H,mref,[],RNcov,[],loc_flag);
         mHref2=mH(:,mref);
         %wts_MCMV=zeros(size(wts2));
         for v=1:size(mref,2)
             H_idx=mref(v);
             r_idx=setdiff(1:size(mref,2),v); %selecting all other leadfield for nulling
-            [~,mH,mori,~]=bl_lcmv_scalar_v4(H,H_idx,mHref2(:,r_idx),RNcov,mref(r_idx),loc_flag);
+            [~,mH,mori,~]=bl_lcmv_scalar_v5(H,H_idx,mHref2(:,r_idx),RNcov,mref(r_idx),loc_flag);
             mHscalar=mH(:,H_idx); ori_MCMV(v,:)=mori(H_idx,:);
             mHref(:,v)=mHscalar;
         end
     elseif  length(mref)==1
-        [~,mH,mori,~]=bl_lcmv_scalar_v4(H,mref,[],RNcov,[],loc_flag);
+        [~,mH,mori,~]=bl_lcmv_scalar_v5(H,mref,[],RNcov,[],loc_flag);
         mHref(:,1)=mH(:,mref); ori_MCMV(1,:)=mori(mref,:);
     elseif  isempty(mref)
         fprintf('WARNING! No sources found!\n');
@@ -488,7 +489,7 @@ while m==0
         
         % Final updating of noise to include mHref
         if ~isempty(mref)
-            %             H_idx=1: size(H,3); [~,~,~,nP]=bl_lcmv_scalar_v4(H,H_idx,mHref,nRNcov,mref,loc_flag);      % this is conservative.
+            %             H_idx=1: size(H,3); [~,~,~,nP]=bl_lcmv_scalar_v5(H,H_idx,mHref,nRNcov,mref,loc_flag);      % this is conservative.
             %             nd=sort(abs(nP.img(~isnan(nP.img)))); nd=nd(nd~=0); null_thresh=nd(ceil(length(nd)*(1-noise_alpha)));
             
             cov_flag = 1;   % using Rinv for weights
@@ -537,7 +538,7 @@ nd=sort(abs(npimg2(~isnan(npimg2)))); nd=nd(nd~=0);  nulled_thresh=nd(ceil(lengt
 
 
 %%
-%  H_idx=1: size(H,3); [f_wts,f_Hscalar,f_ori,f_P]=bl_lcmv_scalar_v4(H,H_idx,mHref,RNcov,mref,loc_flag);      % this is conservative.
+%  H_idx=1: size(H,3); [f_wts,f_Hscalar,f_ori,f_P]=bl_lcmv_scalar_v5(H,H_idx,mHref,RNcov,mref,loc_flag);      % this is conservative.
 %  f_wts(:,mref)=wts(:,mref);
 % %  f_Hscalar(:,mref)=mHref;
 %  f_ori(mref,:)=ori_MCMV;
@@ -609,8 +610,8 @@ MIA.nulled_ori = nulled_ori;
 % [pimg,npimg,bmf_type]=calc_localizer(nulled_wts,mref,RNcov,nRNcov,loc_flag);
 
 function [nulled_wts,nulled_Hscalar,vx_ori]=calc_nulled_wts(H,mHref,RNcov,mref,loc_flag,mref_ori,cov_flag)
-% H_idx=1:size(H,3); [~,~,vx_ori,~]=bl_lcmv_scalar_v4(H,H_idx,[],RNcov,[],loc_flag);
-H_idx=1:size(H,3); [~,~,vx_ori,~]=bl_lcmv_scalar_v4(H,H_idx,mHref,RNcov,mref,loc_flag);
+% H_idx=1:size(H,3); [~,~,vx_ori,~]=bl_lcmv_scalar_v5(H,H_idx,[],RNcov,[],loc_flag);
+H_idx=1:size(H,3); [~,~,vx_ori,~]=bl_lcmv_scalar_v5(H,H_idx,mHref,RNcov,mref,loc_flag);
 if ~isempty(mref) && ~isempty(mref_ori)
     vx_ori(mref,:)=mref_ori; % replacing SPA_ori with MIA_ori
 end

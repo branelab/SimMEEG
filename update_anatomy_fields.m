@@ -56,7 +56,8 @@ if ~isfield(h.anatomy.leadfield,'ori')    % cortical surface leadfields exist
     h.menu_head_model.BackgroundColor = [1 1 1];  h.menu_head_model.ForegroundColor = [1 1 1]*0;
     h.pwd = pwd;
     cd(fullfile(h.FieldTrip_dir,'private\'));
-    h.anatomy.leadfield_eeg_cortex.ori = normals(h.anatomy.mesh_cortex.pos,h.anatomy.mesh_cortex.tri,'vertex'); % finding orientations normalized to cortical surface "cortically contrained"
+%     for n=1:length(h.anatomy.leadfield_eeg_cortex); h.anatomy.leadfield_eeg_cortex(n).ori = normals(h.anatomy.mesh_cortex.pos,h.anatomy.mesh_cortex.tri,'vertex'); end% finding orientations normalized to cortical surface "cortically contrained"
+       h.anatomy.leadfield.ori = normals(h.anatomy.mesh_cortex.pos,h.anatomy.mesh_cortex.tri,'vertex'); % finding orientations normalized to cortical surface "cortically contrained"
     cd(h.pwd);
 % else
 %     h.menu_head_model.Enable = 'inactive'; %h.menu_inv_headmodel.Enable = 'inactive';
@@ -108,9 +109,11 @@ end
 % update channel list box
 try
     if h.menu_sens_type.Value==1 % MEG
-        h.listbox_chans.String = h.anatomy.sens_meg.label; h.listbox_chans.ForegroundColor = h.sens_clr;
+%         h.listbox_chans.String = h.anatomy.sens_meg.label; h.listbox_chans.ForegroundColor = h.sens_clr;
+        h.listbox_chans.String = h.anatomy.sens.label; h.listbox_chans.ForegroundColor = h.sens_clr;
     elseif h.menu_sens_type.Value==2 % EEG
-        h.listbox_chans.String = h.anatomy.sens_eeg.label; h.listbox_chans.ForegroundColor = h.chan_clr;
+%         h.listbox_chans.String = h.anatomy.sens_eeg.label; h.listbox_chans.ForegroundColor = h.chan_clr;
+        h.listbox_chans.String = h.anatomy.sens.label; h.listbox_chans.ForegroundColor = h.chan_clr;
     end
 catch
 end
@@ -123,10 +126,57 @@ try
         else
             h.anatomy.sens.good_sensors = 1:size(h.anatomy.leadfield.H,1);
         end
-    else
+    end
+    if length(h.anatomy.leadfield.label)~=length(h.anatomy.sens.label)
+        
         h.anatomy.sens.bad_sensors = [];
-        h.anatomy.sens.good_sensors = 1:size(h.anatomy.leadfield.H,1);
+        h.anatomy.sens.good_sensors = 1:size(h.anatomy.sens.chanpos,1); %size(h.anatomy.leadfield.H,1);
+        h.anatomy.sens.leadfield_idx = (1:length(h.anatomy.leadfield.label))';
+        % find same labels
+        sens_idx = zeros(length(h.anatomy.leadfield.label),1); % for MEG there are reference sensors thus needed to identify those over scalp and those used as reference sensors
+        for v=1:length(h.anatomy.leadfield.label)
+            if ~isempty(find(strcmpi(h.anatomy.sens.label,h.anatomy.leadfield.label(v)))==1)
+            sens_idx(v) = 1;
+            end
+        end
+        h.anatomy.sens.sens_idx = find(sens_idx==1); 
+    else
+        h.anatomy.sens.leadfield_idx = (1:length(h.anatomy.leadfield.label))';
+        h.anatomy.sens.sens_idx = (1:length(h.anatomy.leadfield.label))';
     end
 catch
+end
+
+%% showing #sensor for loaded MEG and EEG
+if h.menu_sens_type.Value == 1
+        sens_num = [];
+        h.menu_sens_montage.Visible = 'on';
+        for v=1:length(h.anatomy.sens_meg)
+            sens_num(v) = length(h.anatomy.sens_meg(v).label);
+        end
+        h.menu_sens_montage.String = num2str(sens_num'); 
+elseif h.menu_sens_type.Value == 2
+        sens_num = [];
+        h.menu_sens_montage.Visible = 'on';
+        for v=1:length(h.anatomy.sens_eeg)
+            sens_num(v) = length(h.anatomy.sens_eeg(v).label);
+        end
+        h.menu_sens_montage.String = num2str(sens_num'); 
+end
+        
+%% update monte sensor montage #
+if ~isempty(h.anatomy.sens_meg)
+    sens_num = [];
+    for v=1:length(h.anatomy.sens_meg)
+        sens_num(v) = length(h.anatomy.sens_meg(v).label);
+    end
+    h.listbox_monte_MEG_sens_montage.String = num2str(sens_num');
+end
+if ~isempty(h.anatomy.sens_eeg)
+    sens_num = [];
+    for v=1:length(h.anatomy.sens_eeg)
+        sens_num(v) = length(h.anatomy.sens_eeg(v).label);
+    end
+    h.listbox_monte_EEG_sens_montage.String = num2str(sens_num');
 end
 

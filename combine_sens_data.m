@@ -42,6 +42,7 @@ db_diff = snr_db - snr_val;
 
 %% while loop
 t=0;    % Stops while loop after 1000 iterations
+brn_org = brn;
 while abs(db_diff)>snr_thresh
     t=t+1;
     
@@ -61,7 +62,7 @@ while abs(db_diff)>snr_thresh
         break
     end
 end
-
+h.sim_data.noise_gain = brn(1,1,1)./brn_org(1,1,1); % noise gain from original noise
 h.sim_data.sens_noise_final = brn;
 %% plotting
 % clf; hold on; plot(squeeze(h.sim_data.sens_final(:,48,:)),'k');

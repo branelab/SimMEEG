@@ -14,6 +14,8 @@ switch btn
             cfg.conductivity = [0.3300, 0.04, 0.3300];   % based on Lew et al. NeuroImage 76 (2013) 282-293
             cfg.elec = h.anatomy.sens_eeg;
             cfg.method = 'concentricspheres'; % 'bemcp'; % 'openmeeg'; % 'concentricspheres'; %'singlesphere'; % 'bemcp'; %
+           %% Volume: using 'concentricspheres'
+
             % headmodel_eeg_skull = ft_prepare_headmodel(cfg, mesh_volumes([1 2 3]));
             %      cfg.fitind = 3; % fit center of sphere to brain hull
             %    headmodel_eeg_vol = ft_prepare_headmodel(cfg, h.anatomy.mesh_volumes(1:3));
@@ -32,9 +34,15 @@ switch btn
             ft_plot_headmodel(headmodel_eeg_vol,'Facecolor','r','FaceAlpha',.1); view(180,0);
             title('EEG Head Model Concentric Spheres');
             legend({'scalp' 'brain hull' 'headmodel'});
-            
+
             h.anatomy.headmodel_eeg_vol = headmodel_eeg_vol;
             h.anatomy.headmodel = h.anatomy.headmodel_eeg_vol;
+            h.menu_sens_type.Value = 2;
+            
+            %% Cortex: using 'openmeeg' 
+            cfg.method = 'openmeeg'; % 'bemcp'; % 'openmeeg'; % 'concentricspheres'; %'singlesphere'; % 'bemcp'; %
+            h.anatomy.headmodel_eeg_cortex = ft_prepare_headmodel(cfg, h.anatomy.mesh_volumes(1:3));
+            h.anatomy.headmodel = h.anatomy.headmodel_eeg_cortex; 
             h.menu_sens_type.Value = 2;
             
 %             %% save anatomy .mat file
@@ -57,6 +65,8 @@ switch btn
             cfg = [];
             cfg.tissue = {'scalp' 'skull' 'brain'}; cfg.conductivity = [0.3300, 0.04, 0.3300];   % based on Lew et al. NeuroImage 76 (2013) 282-293
             cfg.grad = h.anatomy.sens_meg;
+            
+            %% Volume: using 'localspheres'
             cfg.method = 'localspheres'; % 'openmeeg'; %'concentricspheres'; %'singlesphere'; % 'bemcp'; %
             headmodel_meg = ft_prepare_headmodel(cfg,h.anatomy.mesh_volumes(3));
             headmodel_meg_vol = headmodel_meg;
@@ -66,6 +76,11 @@ switch btn
             % save headmodel_eeg headmodel_eeg;
             h.anatomy.headmodel_meg_vol = headmodel_meg_vol;
             h.anatomy.headmodel = h.anatomy.headmodel_meg_vol;
+
+            %% Cortex: using 'openmeeg'
+            cfg.method = 'openmeeg'; % 'openmeeg'; %'concentricspheres'; %'singlesphere'; % 'bemcp'; %
+            h.anatomy.headmodel_meg_cortex = ft_prepare_headmodel(cfg,h.anatomy.mesh_volumes(1:3));
+            h.anatomy.headmodel = h.anatomy.headmodel_meg_cortex;
             h.menu_sens_type.Value = 1;
             
 %             %% save anatomy .mat file

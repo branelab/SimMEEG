@@ -719,7 +719,7 @@ elseif min_max(1)>min_max(2); min_max(2)=min_max(1)+1;
 end
 
 h.inv_soln(h.current_inv_soln).soln.plot_min_max = real(min_max);
-h.inv_soln(h.current_inv_soln).soln.plot_thresh = round(h.inv_soln(h.current_inv_soln).soln.plot_min_max(2)*.5,3,'significant'); %h.inv_soln(h.current_inv_soln).soln.null_thresh;
+h.inv_soln(h.current_inv_soln).soln.plot_thresh = round(h.inv_soln(h.current_inv_soln).soln.plot_min_max(2)*.5,3,'significant'); %h.inv_soln(h.current_inv_soln).soln.null_thresh(end);
 h.edit_3D_min_max.String = sprintf('%.3f %.3f',h.inv_soln(h.current_inv_soln).soln.plot_min_max);
 
 % updating threshold slider

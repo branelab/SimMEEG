@@ -14,7 +14,7 @@ elseif h.toggle_light_OnOff_anat.Value == 1
 %     if ~isvalid(h.camlight)
         h.camlight1 = camlight;
         h.camlight2 = camlight; % double camlight to make it brighter
-        lighting gouraud; material dull;
+        lighting(h.axes_anatomy, 'gouraud'); material(h.axes_anatomy, 'dull');
 %     end
     h.toggle_light_OnOff_anat.ForegroundColor = [0 .6 0];  h.toggle_light_OnOff_anat.BackgroundColor = [1 1 1];
     h.toggle_light_OnOff_anat.String = 'Light On';

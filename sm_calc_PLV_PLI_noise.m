@@ -64,32 +64,30 @@ if calc_flag==1
         seed_idx = h.inv_soln(h.current_inv_soln).plv_seed_idx;     % seed dipole indices of current lead fields
         comp_idx  = h.inv_soln(h.current_inv_soln).plv_comp_idx;    % comparison dipole indices of current lead fields
         plv_idx = h.inv_soln(h.current_inv_soln).plv_contrast_idx;  % comparison indices for contrasts of "seed_swf"  and "comp_swf" below; clmn 1 = seed_idx;  clmn 2 = comp_idx
-        
+        seed_val_idx = find(~isnan(seed_idx));
+        comp_val_idx = find(~isnan(comp_idx));
+
         switch h.inv_soln(h.current_inv_soln).Type
-            case {'SPA','LCMV','sLORETA','sMCMV','bRAPBeam','TrapMUSIC'}    % BRANE Lab beamformers
+            case {'Dipole' 'SPA' 'LCMV (FT)' 'sLORETA (FT)' 'dics (FT)' 'pcc (FT)' 'SAM (FT)' }     % scalar inverse solutions
                 seed_swf = nan(size(h.sim_data.sens_noise_final,1), length(seed_idx),size(h.sim_data.sens_noise_final,3));
                 comp_swf = nan(size(h.sim_data.sens_noise_final,1), length(comp_idx),size(h.sim_data.sens_noise_final,3));
                 for t=1:size(h.sim_data.sens_noise_final,3)
-                    seed_swf(:,:,t) = [h.inv_soln(h.current_inv_soln).soln.wts(:,seed_idx)'*squeeze(h.sim_data.sens_noise_final(:,:,t))']';
-                    seed_swf(:,:,t) = bsxfun(@minus, seed_swf(:,:,t), nanmean(seed_swf(h.sim_data.cfg.study.base_samps,:,t)));
-                    comp_swf(:,:,t) = [h.inv_soln(h.current_inv_soln).soln.wts(:,comp_idx)'*squeeze(h.sim_data.sens_noise_final(:,:,t))']';
-                    comp_swf(:,:,t) = bsxfun(@minus, comp_swf(:,:,t), nanmean(comp_swf(h.sim_data.cfg.study.base_samps,:,t)));
+                    seed_swf(:,seed_val_idx,t) = [h.inv_soln(h.current_inv_soln).soln.wts(:,seed_idx(seed_val_idx))'*squeeze(h.sim_data.sens_noise_final(:,:,t))']';
+                    seed_swf(:,seed_val_idx,t) = bsxfun(@minus, seed_swf(:,seed_val_idx,t), nanmean(seed_swf(h.sim_data.cfg.study.base_samps,seed_val_idx,t)));
+                    comp_swf(:,comp_val_idx,t) = [h.inv_soln(h.current_inv_soln).soln.wts(:,comp_idx(comp_val_idx))'*squeeze(h.sim_data.sens_noise_final(:,:,t))']';
+                    comp_swf(:,comp_val_idx,t) = bsxfun(@minus, comp_swf(:,comp_val_idx,t), nanmean(comp_swf(h.sim_data.cfg.study.base_samps,comp_val_idx,t)));
                 end
-            case {'SIA','MIA'}    % BRANE Lab beamformers - have to use nulled_wts or plv_locs that were not in wts matrix will have nans
+            case {'SIA' 'MIA' 'sMCMV' 'bRAPBeam' 'TrapMUSIC'}    % multi-source beamformers - have to use nulled_wts or plv_locs that were not in wts matrix will have nans
                 seed_swf = nan(size(h.sim_data.sens_noise_final,1), length(seed_idx),size(h.sim_data.sens_noise_final,3));
                 comp_swf = nan(size(h.sim_data.sens_noise_final,1), length(comp_idx),size(h.sim_data.sens_noise_final,3));
                 for t=1:size(h.sim_data.sens_noise_final,3)
                     %                 % % using nulled wts calculated from Ninv Noise Covarianace may get better supression of noise because it doesn't include possible active source as in Rinv
-                    seed_swf(:,:,t) = [h.inv_soln(h.current_inv_soln).soln.nulled_wts(:,seed_idx)'*squeeze(h.sim_data.sens_noise_final(:,:,t))']';
-                    seed_swf(:,:,t) = bsxfun(@minus, seed_swf(:,:,t), nanmean(seed_swf(h.sim_data.cfg.study.base_samps,:,t)));
-                    comp_swf(:,:,t) = [h.inv_soln(h.current_inv_soln).soln.nulled_wts(:,comp_idx)'*squeeze(h.sim_data.sens_noise_final(:,:,t))']';
-                    comp_swf(:,:,t) = bsxfun(@minus, comp_swf(:,:,t), nanmean(comp_swf(h.sim_data.cfg.study.base_samps,:,t)));
-                    %                 seed_swf(:,:,t) = [h.inv_soln(h.current_inv_soln).soln.wts(:,seed_idx)'*squeeze(h.sim_data.sens_noise_final(:,:,t))']';
-                    %                 seed_swf(:,:,t) = bsxfun(@minus, seed_swf(:,:,t), nanmean(seed_swf(h.sim_data.cfg.study.base_samps,:,t)));
-                    %                 comp_swf(:,:,t) = [h.inv_soln(h.current_inv_soln).soln.wts(:,comp_idx)'*squeeze(h.sim_data.sens_noise_final(:,:,t))']';
-                    %                 comp_swf(:,:,t) = bsxfun(@minus, comp_swf(:,:,t), nanmean(comp_swf(h.sim_data.cfg.study.base_samps,:,t)));
+                    seed_swf(:,seed_val_idx,t) = [h.inv_soln(h.current_inv_soln).soln.nulled_wts(:,seed_idx(seed_val_idx))'*squeeze(h.sim_data.sens_noise_final(:,:,t))']';
+                    seed_swf(:,seed_val_idx,t) = bsxfun(@minus, seed_swf(:,seed_val_idx,t), nanmean(seed_swf(h.sim_data.cfg.study.base_samps,seed_val_idx,t)));
+                    comp_swf(:,comp_val_idx,t) = [h.inv_soln(h.current_inv_soln).soln.nulled_wts(:,comp_idx(comp_val_idx))'*squeeze(h.sim_data.sens_noise_final(:,:,t))']';
+                    comp_swf(:,comp_val_idx,t) = bsxfun(@minus, comp_swf(:,comp_val_idx,t), nanmean(comp_swf(h.sim_data.cfg.study.base_samps,comp_val_idx,t)));
                 end
-            case {'eLORETA','MNE'}    % Field Trips inverse solutions
+            case {'MNE (FT)' 'eLORETA (FT)' 'LCMV (BST)' 'MNE (BST)' 'sLORETA (BST)'}   % vector inverse solutions
                 % picking orientation with maximal response in active interval to generate a source waveform
                 clear seed_swf comp_swf;
                 % re-order wts in case different dimensions --> wts dims should be [chans x voxels x ori]
@@ -105,27 +103,33 @@ if calc_flag==1
                 % source waveforms for 3-vector dipoles per voxel
                 swf=[];
                 for ox=1:size(wts,3)
-                    seed_swf(:,ox,:) = (squeeze(wts(:,seed_idx,ox))'*squeeze(nanmean(h.sim_data.sens_noise_final,3))')';
-                    seed_swf(:,ox,:) = bsxfun(@minus, seed_swf(:,ox,:), nanmean(seed_swf(h.sim_data.cfg.study.base_samps,ox,:)));
-                    comp_swf(:,ox,:) = (squeeze(wts(:,comp_idx,ox))'*squeeze(nanmean(h.sim_data.sens_noise_final,3))')';
-                    comp_swf(:,ox,:) = bsxfun(@minus, comp_swf(:,ox,:), nanmean(comp_swf(h.sim_data.cfg.study.base_samps,ox,:)));
+                    seed_swf(:,ox,seed_val_idx) = (squeeze(wts(:,seed_idx(seed_val_idx),ox))'*squeeze(nanmean(h.sim_data.sens_noise_final,3))')';
+                    seed_swf(:,ox,seed_val_idx) = bsxfun(@minus, seed_swf(:,ox,seed_val_idx), nanmean(seed_swf(h.sim_data.cfg.study.base_samps,ox,seed_val_idx)));
+                    comp_swf(:,ox,comp_val_idx) = (squeeze(wts(:,comp_idx(comp_val_idx),ox))'*squeeze(nanmean(h.sim_data.sens_noise_final,3))')';
+                    comp_swf(:,ox,comp_val_idx) = bsxfun(@minus, comp_swf(:,ox,comp_val_idx), nanmean(comp_swf(h.sim_data.cfg.study.base_samps,ox,comp_val_idx)));
                 end
                 % For vector inv_soln --> selecting dipole orientation (X,Y,or Z) that has max RMS across active interval time samples 'act_samp'
-                [~,seed_max_ori] = max(squeeze(rms(seed_swf(h.sim_data.cfg.study.bl_bmf.act_samps,:,:),1)));
-                [~,comp_max_ori] = max(squeeze(rms(comp_swf(h.sim_data.cfg.study.bl_bmf.act_samps,:,:),1)));
+                [~,seed_max_ori] = nanmax(squeeze(rms(seed_swf(h.sim_data.cfg.study.bl_bmf.act_samps,:,:),1)));
+                [~,comp_max_ori] = nanmax(squeeze(rms(comp_swf(h.sim_data.cfg.study.bl_bmf.act_samps,:,:),1)));
                 
                 seed_swf = nan(size(h.sim_data.sens_noise_final,1), length(seed_idx),size(h.sim_data.sens_noise_final,3));
                 comp_swf = nan(size(h.sim_data.sens_noise_final,1), length(comp_idx),size(h.sim_data.sens_noise_final,3));
-                            for v=1:length(seed_idx)
-                    for t=1:size(h.sim_data.sens_noise_final,3)
-                        seed_swf(:,v,t) = [squeeze(h.inv_soln(h.current_inv_soln).soln.wts(:,seed_idx(v),seed_max_ori(v)))'*squeeze(h.sim_data.sens_noise_final(:,:,t))']';
+                for v=1:length(seed_idx)
+                    if ~isnan(seed_idx(v))
+                        for t=1:size(h.sim_data.sens_noise_final,3)
+                            seed_swf(:,v,t) = [squeeze(h.inv_soln(h.current_inv_soln).soln.wts(:,seed_idx(v),seed_max_ori(v)))'*squeeze(h.sim_data.sens_noise_final(:,:,t))']';
+                        end
                     end
                 end
+                            
                 for v=1:length(comp_idx)
-                    for t=1:size(h.sim_data.sens_noise_final,3)
-                        comp_swf(:,v,t) = [squeeze(h.inv_soln(h.current_inv_soln).soln.wts(:,comp_idx(v),comp_max_ori(v)))'*squeeze(h.sim_data.sens_noise_final(:,:,t))']';
+                    if ~isnan(comp_idx(v))
+                        for t=1:size(h.sim_data.sens_noise_final,3)
+                            comp_swf(:,v,t) = [squeeze(h.inv_soln(h.current_inv_soln).soln.wts(:,comp_idx(v),comp_max_ori(v)))'*squeeze(h.sim_data.sens_noise_final(:,:,t))']';
+                        end
                     end
                 end
+                
                 seed_swf = bsxfun(@minus, seed_swf, nanmean(seed_swf(h.sim_data.cfg.study.base_samps,:,:)));
                 comp_swf = bsxfun(@minus, comp_swf, nanmean(comp_swf(h.sim_data.cfg.study.base_samps,:,:)));
         end
@@ -146,12 +150,15 @@ if calc_flag==1
         for v=1:size(seed_swf,2)    % num seed sources
             waitbar(v/size(seed_swf,2),hw);
             %% Wavelets - Total Power
-            for t=1:size(seed_swf,3)
-                [seed_wt(:,:,v,t),F,coi_seed_wt]=cwt(squeeze(seed_swf(:,v,t)),'morse',cfg.study.srate,'TimeBandwidth',TB,'FrequencyLimits',flimits,'VoicesPerOctave',str2num(h.edit_inv_wvlt_num_voices.String)); % total power
-                [seed_wt_ind(:,:,v,t),F,coi_seed_wt]=cwt(squeeze(seed_ind(:,v,t)),'morse',cfg.study.srate,'TimeBandwidth',TB,'FrequencyLimits',flimits,'VoicesPerOctave',str2num(h.edit_inv_wvlt_num_voices.String));    %induced power
+            if ~isnan(seed_idx(v))
+                for t=1:size(seed_swf,3)
+                    [seed_wt(:,:,v,t),F,coi_seed_wt]=cwt(squeeze(seed_swf(:,v,t)),'morse',cfg.study.srate,'TimeBandwidth',TB,'FrequencyLimits',flimits,'VoicesPerOctave',str2num(h.edit_inv_wvlt_num_voices.String)); % total power
+                    [seed_wt_ind(:,:,v,t),F,coi_seed_wt]=cwt(squeeze(seed_ind(:,v,t)),'morse',cfg.study.srate,'TimeBandwidth',TB,'FrequencyLimits',flimits,'VoicesPerOctave',str2num(h.edit_inv_wvlt_num_voices.String));    %induced power
+                end
+                [seed_wt_evk(:,:,v),F,coi_seed_wt]=cwt(squeeze(nanmean(seed_swf(:,v,:),3)),'morse',cfg.study.srate,'TimeBandwidth',TB,'FrequencyLimits',flimits,'VoicesPerOctave',str2num(h.edit_inv_wvlt_num_voices.String));    % evoked power
             end
-            [seed_wt_evk(:,:,v),F,coi_seed_wt]=cwt(squeeze(nanmean(seed_swf(:,v,:),3)),'morse',cfg.study.srate,'TimeBandwidth',TB,'FrequencyLimits',flimits,'VoicesPerOctave',str2num(h.edit_inv_wvlt_num_voices.String));    % evoked power
         end
+        
         delete(hw);
         %% cwt has outputs freq indices in descending order
         F2=flipud(F); seed_wt2=single(flipud(seed_wt)); seed_wt2_ind=single(flipud(seed_wt_ind)); seed_wt2_evk=single(flipud(seed_wt_evk));
@@ -179,28 +186,35 @@ if calc_flag==1
         hw = waitbar(0,'Calculating Wavelets for each Comparison Location');
         for v=1:size(comp_swf,2)    % num comp sources
             waitbar(v/size(comp_swf,2),hw);
-            %% Wavelets - Total Power
+         if ~isnan(comp_idx(v))
+             %% Wavelets - Total Power
             for t=1:size(comp_swf,3)
                 [comp_wt(:,:,v,t),F,coi_comp_wt]=cwt(squeeze(comp_swf(:,v,t)),'morse',cfg.study.srate,'TimeBandwidth',TB,'FrequencyLimits',flimits,'VoicesPerOctave',str2num(h.edit_inv_wvlt_num_voices.String)); % total power
                 [comp_wt_ind(:,:,v,t),F,coi_comp_wt]=cwt(squeeze(comp_ind(:,v,t)),'morse',cfg.study.srate,'TimeBandwidth',TB,'FrequencyLimits',flimits,'VoicesPerOctave',str2num(h.edit_inv_wvlt_num_voices.String));    %induced power
             end
             [comp_wt_evk(:,:,v),F,coi_comp_wt]=cwt(squeeze(nanmean(comp_swf(:,v,:),3)),'morse',cfg.study.srate,'TimeBandwidth',TB,'FrequencyLimits',flimits,'VoicesPerOctave',str2num(h.edit_inv_wvlt_num_voices.String));    % evoked power
+         end
         end
         delete(hw);
         
         %% cwt has outputs freq indices in descending order
-        F2=flipud(F); comp_wt2=single(flipud(comp_wt)); comp_wt2_ind=single(flipud(comp_wt_ind)); comp_wt2_evk=single(flipud(comp_wt_evk));
-        clear comp_wt comp_wt_ind comp_wt_evk;
+        try
+            F2=flipud(F); comp_wt=flipud(single(comp_wt)); comp_wt_ind=single(flipud(comp_wt_ind)); comp_wt_evk=single(flipud(comp_wt_evk));
+        catch
+            F2=flipud(F); comp_wt=flipud(comp_wt); comp_wt_ind=flipud(comp_wt_ind); comp_wt_evk=flipud(comp_wt_evk);
+        end
+       
+%            clear comp_wt comp_wt_ind comp_wt_evk;
         
         % Decibel
         % all
-        db_comp_wt = 10*bsxfun(@minus,log10(abs(comp_wt2)),log10(nanmean(abs(comp_wt2(:,cfg.study.base_samps,:,:)),2)));
+        db_comp_wt = 10*bsxfun(@minus,log10(abs(comp_wt)),log10(nanmean(abs(comp_wt(:,cfg.study.base_samps,:,:)),2)));
         comp_wt_based = bsxfun(@minus,db_comp_wt,nanmean(db_comp_wt(:,cfg.study.base_samps,:,:),2));   % decibel baselined
         % induced
-        db_comp_wt = 10*bsxfun(@minus,log10(abs(comp_wt2_ind)),log10(nanmean(abs(comp_wt2_ind(:,cfg.study.base_samps,:,:)),2)));
+        db_comp_wt = 10*bsxfun(@minus,log10(abs(comp_wt_ind)),log10(nanmean(abs(comp_wt_ind(:,cfg.study.base_samps,:,:)),2)));
         comp_wt_ind_based = bsxfun(@minus,db_comp_wt,nanmean(db_comp_wt(:,cfg.study.base_samps,:,:),2));   % decibel baselined
         % evoked
-        db_comp_wt = 10*bsxfun(@minus,log10(abs(comp_wt2_evk)),log10(nanmean(abs(comp_wt2_evk(:,cfg.study.base_samps,:,:)),2)));
+        db_comp_wt = 10*bsxfun(@minus,log10(abs(comp_wt_evk)),log10(nanmean(abs(comp_wt_evk(:,cfg.study.base_samps,:,:)),2)));
         comp_wt_evk_based = bsxfun(@minus,db_comp_wt,nanmean(db_comp_wt(:,cfg.study.base_samps,:,:),2));   % decibel baselined
         
         avg_comp_wt=nanmean(comp_wt_based,4);
@@ -212,11 +226,13 @@ if calc_flag==1
     fprintf('Calculating PLV ...\n')
     
     seed_phase_data=angle(seed_wt2);
-    comp_phase_data=angle(comp_wt2);
-    plv_phase = cat(3,seed_phase_data,comp_phase_data); % concatenating phases to work with calc_PLV_ath.m
-    
+    comp_phase_data=angle(comp_wt);
+%     plv_phase = cat(3,seed_phase_data,comp_phase_data); % concatenating phases to work with calc_PLV_ath.m
+     plv_phase = comp_phase_data; 
+    plv_phase(:,:,1:size(seed_phase_data,3),:) = seed_phase_data; % concatenating phases to work with calc_PLV_ath.m
+   
     chan_contrasts = plv_idx;
-    chan_contrasts(:,2) = chan_contrasts(:,2)+length(seed_idx);   % making matrix compatible with plv_phase for calc_PLV_ath.m
+%     chan_contrasts(:,2) = chan_contrasts(:,2)+length(seed_idx);   % making matrix compatible with plv_phase for calc_PLV_ath.m
     
     F_plv=F2;
     coi_wt2=coi_seed_wt; coi_wt2(coi_seed_wt>max(F2))=nan; coi_wt2(coi_seed_wt<min(F2))=nan;

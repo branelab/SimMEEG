@@ -15,6 +15,23 @@ if ~isempty(h.sim_data)
     
     prepost_wav = h.sim_data.prepost_wav;
     prepost_win = h.sim_data.prepost_win;
+    
+    if isempty(sig_wav); sig_wav = zeros(size(sig_final)); end
+    if isempty(sig_win); sig_win = zeros(size(sig_final)); end
+    if isempty(prepost_wav); prepost_wav = zeros(size(sig_final)); end
+    if isempty(prepost_win); prepost_win = zeros(size(sig_final)); end
+    
+    % padd zeros for ARM sources
+    dims1 = size(sig_wav); dims2 = size(sig_final);
+    if any(dims1(1:3)~=dims2(1:3)); vx = dims1(2)+1:dims2(2); sig_wav(:,vx,:) = zeros(dims1(1),length(vx),dims1(3)); end
+    dims1 = size(sig_win); dims2 = size(sig_final);
+    if any(dims1(1:3)~=dims2(1:3)); vx = dims1(2)+1:dims2(2); sig_win(:,vx,:) = zeros(dims1(1),length(vx),dims1(3)); end
+    
+    dims1 = size(prepost_wav); dims2 = size(sig_final);
+    if any(dims1(1:3)~=dims2(1:3)); vx = dims1(2)+1:dims2(2); prepost_wav(:,vx,:) = zeros(dims1(1),length(vx),dims1(3)); end
+    dims1 = size(prepost_win); dims2 = size(sig_final);
+    if any(dims1(1:3)~=dims2(1:3)); vx = dims1(2)+1:dims2(2); prepost_win(:,vx,:) = zeros(dims1(1),length(vx),dims1(3)); end
+        
     cfg = h.sim_data.cfg;
     cfg.study.plot_time_int = str2num(h.edit_plot_time_int.String);
     cfg.study.plot_freq_int = str2num(h.edit_plot_freq_int.String);
@@ -23,6 +40,7 @@ if ~isempty(h.sim_data)
     %% %%%%%%%%%%%%%%%%%%% Time-Frequency Analyses %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %% TFR & PLV/PLI parameters
     [num_chans,num_freqs,num_minmaxfr]=size(cfg.source.sig_freqs);
+    num_chans = size(sig_final,2);
     lat=cfg.study.lat_sim;
     min_max_freq=cfg.study.plot_freq_int;
     %% calculate wavelets (total & induced) under signal final
@@ -113,13 +131,13 @@ if ~isempty(h.sim_data)
     min_max2_ind = [-12 12]; %str2num(h.edit_plot_caxis.String); % wavelet color axis scale as percent of baseline
     min_max3=[-max(max(max(abs(sig_final)))) max(max(max(abs(sig_final))))]*110; % wavelet color axis scale as percent of baseline
     %     plv_caxis=[-.5 .5]; pli_caxis=[-.5 .5]; dpli_caxis=pli_caxis; %[-0.25 0.25];
-    min_max2 = [-1 1]; %str2num(h.edit_plot_caxis.String); % wavelet color axis scale as percent of baseline
-    min_max2_evk = [-10  10]; %str2num(h.edit_plot_caxis.String); % wavelet color axis scale as percent of baseline
-    min_max2_ind = [-1 1]; %str2num(h.edit_plot_caxis.String); % wavelet color axis scale as percent of baseline
+    min_max2 = [-3 3]; %str2num(h.edit_plot_caxis.String); % wavelet color axis scale as percent of baseline
+    min_max2_evk = [-15  15]; %str2num(h.edit_plot_caxis.String); % wavelet color axis scale as percent of baseline
+    min_max2_ind = [-3 3]; %str2num(h.edit_plot_caxis.String); % wavelet color axis scale as percent of baseline
     plv_caxis=[-.25 .25]; pli_caxis=[-.25 .25]; dpli_caxis=pli_caxis; %[-0.25 0.25];
     
-    mrk_clr=h.src_clr;
-    plv_clr=[.7 0 .9; 1 0 1; 1 .6 0];
+    mrk_clr=h.cfg.source.src_clr;
+    plv_clr=[.7 0 .9; 1 0 1; 1 .6 0]; 
     xtik=[-.4:.2:1.2];
     f_size=10; % font size for axis & title
     f_size2=8; % font size for legend
@@ -199,7 +217,10 @@ if ~isempty(h.sim_data)
                 p4=plot(cfg.study.lat_sim,squeeze(nanmean(sig_wav(:,v,:,f),3))*100,'color',mrk_clr(v,:)*.75,'linewidth',2);
                 plot([0 0],[min_max],'k--');
                 axis([cfg.study.plot_time_int min_max]);  set(gca,'XTick',xtik,'Fontsize',f_size);
-                title(sprintf('Source %.f (%.1f-%.1f Hz)',v,squeeze(cfg.source.sig_freqs(v,f,:))),'Color',mrk_clr(v,:)); box on;
+                try title(sprintf('Source %.f (%.1f-%.1f Hz)',v,squeeze(cfg.source.sig_freqs(v,f,:))),'Color',mrk_clr(v,:)); box on;
+                catch
+                    title(sprintf('Source %.f',v),'Color',mrk_clr(v,:)); box on;
+                end
                 if v==1; ylabel('Amplitude (%)'); end
                 if f==num_freqs; xlabel('Time (sec'); end
                 
@@ -225,21 +246,21 @@ if ~isempty(h.sim_data)
     end
     %% Power wavelets
     for v=1:num_chans
-        axes(ax(v+3)); cla;  hold on; axis on;
+        axes(ax(v+num_chans)); cla;  hold on; axis on;
         surf(cfg.study.lat_sim,F2,squeeze(avg_wt(:,:,v))); view(0,90); shading interp; colormap(jet); axis tight;
         plot3(cfg.study.lat_sim,coi_wt,ones(size(coi_wt)),'color',[1 1 1]*.7,'linewidth',2)
         plot3([0 0],[min_max_freq],[min_max2(2) min_max2(2)],'k--');
         axis([cfg.study.plot_time_int cfg.study.plot_freq_int]); caxis(min_max2); set(gca,'XTick',xtik,'Fontsize',f_size);
         title(sprintf('Total Power: Source %.f',v),'Color',mrk_clr(v,:));
         if v==1; ylabel('Frequency (Hz)'); end
-        axes(ax(v+6)); cla;  hold on; axis on;
+        axes(ax(v+(2*num_chans))); cla;  hold on; axis on;
         surf(cfg.study.lat_sim,F2,squeeze(avg_wt_evk(:,:,v))); view(0,90); shading interp; colormap(jet); axis tight;
         plot3(cfg.study.lat_sim,coi_wt,ones(size(coi_wt)),'color',[1 1 1]*.7,'linewidth',2)
         plot3([0 0],[min_max_freq],[min_max2_evk(2) min_max2_evk(2)],'k--');
         axis([cfg.study.plot_time_int cfg.study.plot_freq_int]); caxis(min_max2_evk); set(gca,'XTick',xtik,'Fontsize',f_size);
         title(sprintf('Evoked Power: Source %.f',v),'Color',mrk_clr(v,:));
         if v==1; ylabel('Frequency (Hz)'); end
-        axes(ax(v+9)); cla;  hold on; axis on;
+        axes(ax(v+(3*num_chans))); cla;  hold on; axis on;
         surf(cfg.study.lat_sim,F2,squeeze(avg_wt_ind(:,:,v))); view(0,90); shading interp; colormap(jet); axis tight;
         plot3(cfg.study.lat_sim,coi_wt,ones(size(coi_wt)),'color',[1 1 1]*.7,'linewidth',2)
         plot3([0 0],[min_max_freq],[min_max2_ind(2) min_max2_ind(2)],'k--');
@@ -253,10 +274,16 @@ if ~isempty(h.sim_data)
     ax3=axes('Position',[.84 ax(12).Position(2) .1 ax(12).Position(4)]); axis off; hc=colorbar('peer',ax3,'Location','EastOutside');  ax3.Position(3)=.1; ylabel(hc,'Power (dB re:baseline)'); caxis(min_max2_ind); hc.Label.Position=[2 0 0];
     
     %% figure(998): PLV & PLI plots
-    figure(998); clf; set(gcf,'color','w');
-    ax=subplot_axes(3,num_clmns,.06,.05,0,0,0);
-    for vx=1:length(chan_contrasts)
-        axes(ax(vx)); cla;  hold on; axis on;
+     plv_clr = repmat([0 0 0],length(chan_contrasts),1);
+    xn = ceil(length(chan_contrasts)^.5);
+    figure(9981); clf; set(gcf,'color','w');    % PLV
+    ax1=subplot_axes(xn,xn,.06,.05,0,0,0);
+    figure(9982); clf; set(gcf,'color','w');    % PLI
+    ax2=subplot_axes(xn,xn,.06,.05,0,0,0);
+    figure(9983); clf; set(gcf,'color','w');    % dPLI
+     ax3=subplot_axes(xn,xn,.06,.05,0,0,0);
+   for vx=1:length(chan_contrasts)
+        axes(ax1(vx)); cla;  hold on; axis on;
         surf(cfg.study.lat_sim,F_plv,squeeze(plv_based(:,vx,:))); view(0,90); shading interp; colormap(jet);
         %         surf(cfg.study.lat_sim,F_plv,squeeze(plv_data(:,vx,:))); view(0,90); shading interp; colormap(jet);
         plot3(cfg.study.lat_sim,coi_wt2,ones(size(coi_wt2)),'color',[1 1 1]*.7,'linewidth',2);
@@ -265,7 +292,7 @@ if ~isempty(h.sim_data)
         axis([cfg.study.plot_time_int cfg.study.plot_freq_int]); caxis(plv_caxis); set(gca,'XTick',xtik,'Fontsize',f_size);
         if vx==1; ylabel('Freq (Hz)'); end
         
-        axes(ax(vx+3)); cla;  hold on; axis on;
+        axes(ax2(vx)); cla;  hold on; axis on;
         surf(pli_lat,F_plv,squeeze(pli_based(:,vx,:))); view(0,90); shading interp; colormap(jet);
         %         surf(pli_lat,F_plv,squeeze(pli_data(:,vx,:))); view(0,90); shading interp; colormap(jet);
         plot3(cfg.study.lat_sim,coi_wt2,ones(size(coi_wt2)),'color',[1 1 1]*.7,'linewidth',2);
@@ -274,7 +301,7 @@ if ~isempty(h.sim_data)
         axis([cfg.study.plot_time_int cfg.study.plot_freq_int]); caxis(pli_caxis); set(gca,'XTick',xtik,'Fontsize',f_size);
         if vx==1; ylabel('Freq (Hz)'); end
         
-        axes(ax(vx+6)); cla;  hold on; axis on;
+        axes(ax3(vx)); cla;  hold on; axis on;
         surf(pli_lat,F_plv,squeeze(dpli_based(:,vx,:))); view(0,90); shading interp; colormap(jet);
         %          surf(pli_lat,F_plv,squeeze(dpli_data(:,vx,:))-0.5); view(0,90); shading interp; colormap(jet);
         plot3(cfg.study.lat_sim,coi_wt2,ones(size(coi_wt2)),'color',[1 1 1]*.7,'linewidth',2);
@@ -399,7 +426,7 @@ if ~isempty(h.sim_data)
         title(ax(a_idx(1,a)),sprintf('Signal: Source %.f modulated by Source %.f ', h.PAC_source_contrasts(a,:)));
         text(ax(a_idx(1,a)),(phase_bin(1)/(2*pi))*360,y_lim(2)*.95,sprintf('Modulation Index = %.4f',MI))
         
-        % perpost PAC
+        % prepost PAC
         fc_amp = abs(squeeze(wt2(fc_wt,prepost_samps,v_fc,:))); fc_amp = reshape(fc_amp,[numel(fc_amp) 1]);
         fm_phase = angle(squeeze(wt2(fm_wt,prepost_samps,v_fm,:))); fm_phase = reshape(fm_phase,[numel(fm_phase) 1]);
         nbin=36; phase_bin=linspace(-pi,pi,nbin);

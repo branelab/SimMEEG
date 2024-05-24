@@ -61,7 +61,6 @@ H(abs(H)<eps)=eps;
 wts_MCMV=[];
 % calculating covarince matrices for signal+noise (Rinv) and noise (Ninv
 xs=round(size(ctrl_samps,2)/2);
-
 %% checking rank of data. If it doesn't match the num_chans then white noise will be added until rank sufficient.
 R=[]; t=0;
 [R,~,~,~,~,~]=BRANELab_calc_cov(data,act_samps,ctrl_samps(xs+1:end));
@@ -73,11 +72,10 @@ while r2<size(H,1)
     [R,~,~,~,~,~]=BRANELab_calc_cov(data,act_samps,ctrl_samps(xs+1:end));
     r2=rank(R);
     fprintf('Rank = %.f\tChannel Count=%.f\n',r2,size(data,2));
-    if 100*(t*xstd)/max(max(std(data)))>10; fprintf('WARNING! Insufficient Rank in Data or Data is empty\n'); SIA=[]; return; end % stopping infinite loop
+    if 100*(t*xstd)/max(max(std(data)))>10; fprintf('WARNING! Insufficient Rank in Data or Data is empty\n'); MIA=[]; return; end % stopping infinite loop
     % fprintf('Rank = %.f\n',r2);
     fprintf('Percent white noise added for sufficient rank = %.3f %%\n\n',100*(t*xstd)/max(max(std(data))));
 end
-
 %% calc covariance
 %[R,N,Rbar,Nbar,Rinv,Ninv]=BRANELab_calc_cov(data,act_samps,ctrl_samps);
 [R,N,Rbar,Nbar,Rinv,Ninv]=BRANELab_calc_cov(data,act_samps,ctrl_samps(xs+1:end));
@@ -112,7 +110,7 @@ end
 % %keyboard;
 
 % First calculation of noise - like SPA
-H_idx=1:size(H,3); [~,~,~,nP]=bl_lcmv_scalar_v4(H,H_idx,[],nRNcov,[],loc_flag);
+H_idx=1:size(H,3); [~,~,~,nP]=bl_lcmv_scalar_v5(H,H_idx,[],nRNcov,[],loc_flag);
 null_thresh=max(nP.img);
 
 mm=1;  %num_loops=30; % number of allowable iterations to find source.
@@ -122,12 +120,12 @@ while mm~=0
     if length(mref)>=max_sources;  mm=0; fprintf('Found maximum number of sources set by user: %.f\n',length(mref)); break; end % breaking loop because maximum number of sources found as set by the user
  
     % loop through "bl_lcmv_scalar" fucntion until maximal signal across all peak voxels are maximum???.
-    H_idx=1:size(H,3); [~,Hscalar2,ori,P2]=bl_lcmv_scalar_v4(H,H_idx,mHref,RNcov,mref,loc_flag);
+    H_idx=1:size(H,3); [~,Hscalar2,ori,P2]=bl_lcmv_scalar_v5(H,H_idx,mHref,RNcov,mref,loc_flag);
     
     % updating of noise to include mHref
 %     if ~isempty(mref)
 %         % iteratively updating noise to include Href
-%         H_idx=1: size(H,3); [~,~,~,nP]=bl_lcmv_scalar_v4(H,H_idx,mHref,nRNcov,mref,loc_flag);
+%         H_idx=1: size(H,3); [~,~,~,nP]=bl_lcmv_scalar_v5(H,H_idx,mHref,nRNcov,mref,loc_flag);
 %         null_thresh=max(abs(nP.img));
 %         nd=sort(nP.img); nd=nd(nd~=0); null_thresh=nd(ceil(length(nd)*noise_alpha));
 %     end
@@ -202,18 +200,18 @@ while mm~=0
 %     if zz>num_loops; mm=0; end
     %%% finding best Lead-field when accounting for all found sources.
     if length(mref)>1;
-        [~,mH]=bl_lcmv_scalar_v4(H,mref,[],RNcov,[],loc_flag);
+        [~,mH]=bl_lcmv_scalar_v5(H,mref,[],RNcov,[],loc_flag);
         mHref2=mH(:,mref);
         %wts_MCMV=zeros(size(wts2));
         for v=1:size(mref,2);
             H_idx=mref(v);
             r_idx=setdiff(1:size(mref,2),v); %selecting all other leadfield for nulling
-            [~,mH,mori,P3]=bl_lcmv_scalar_v4(H,H_idx,mHref2(:,r_idx),RNcov,mref(r_idx),loc_flag);
+            [~,mH,mori,P3]=bl_lcmv_scalar_v5(H,H_idx,mHref2(:,r_idx),RNcov,mref(r_idx),loc_flag);
             mHscalar=mH(:,H_idx); ori_MCMV(v,:)=mori(H_idx,:);
             mHref(:,v)=mHscalar;
         end
     elseif  length(mref)==1;
-        [~,mH,mori,~]=bl_lcmv_scalar_v4(H,mref,[],RNcov,[],loc_flag);
+        [~,mH,mori,~]=bl_lcmv_scalar_v5(H,mref,[],RNcov,[],loc_flag);
         mHref(:,1)=mH(:,mref); ori_MCMV(1,:)=mori(mref,:);
     elseif  isempty(mref);
         fprintf('WARNING! No sources found!\n');
@@ -250,18 +248,18 @@ m=0;
 while m==0;
     
     if length(mref)>1;
-        [~,mH]=bl_lcmv_scalar_v4(H,mref,[],RNcov,[],loc_flag);
+        [~,mH]=bl_lcmv_scalar_v5(H,mref,[],RNcov,[],loc_flag);
         mHref2=mH(:,mref);
         %wts_MCMV=zeros(size(wts2));
         for v=1:size(mref,2);
             H_idx=mref(v);
             r_idx=setdiff(1:size(mref,2),v); %selecting all other leadfield for nulling
-            [~,mH,mori,P3]=bl_lcmv_scalar_v4(H,H_idx,mHref2(:,r_idx),RNcov,mref(r_idx),loc_flag);
+            [~,mH,mori,P3]=bl_lcmv_scalar_v5(H,H_idx,mHref2(:,r_idx),RNcov,mref(r_idx),loc_flag);
             mHscalar=mH(:,H_idx); ori_MCMV(v,:)=mori(H_idx,:);
             mHref(:,v)=mHscalar;
         end
     elseif  length(mref)==1;
-        [~,mH,mori,~]=bl_lcmv_scalar_v4(H,mref,[],RNcov,[],loc_flag);
+        [~,mH,mori,~]=bl_lcmv_scalar_v5(H,mref,[],RNcov,[],loc_flag);
         mHref(:,1)=mH(:,mref); ori_MCMV(1,:)=mori(mref,:);
     elseif  isempty(mref);
         fprintf('WARNING! No sources found!\n');
@@ -289,7 +287,7 @@ while m==0;
         
 %         % Final updating of noise to include mHref
 %         if ~isempty(mref)
-%             H_idx=1: size(H,3); [~,~,~,nP]=bl_lcmv_scalar_v4(H,H_idx,mHref,nRNcov,mref,loc_flag);      % this is conservative.
+%             H_idx=1: size(H,3); [~,~,~,nP]=bl_lcmv_scalar_v5(H,H_idx,mHref,nRNcov,mref,loc_flag);      % this is conservative.
 %             nd=sort(nP.img); nd=nd(nd~=0); null_thresh=nd(ceil(length(nd)*noise_alpha));
 %         end
         
@@ -338,7 +336,7 @@ for v=1:length(MCMV_idx); fprintf('%.f \t %.3f\n',MCMV_idx(v),P.img(MCMV_idx(v))
 fprintf('Noise \t %.3f\n',null_thresh);
 
 %% generate noise img by running MCMV beamformer wts for all voxels but the MCMV_idx are the ref voxels.
-[~,nHscalar2,nori,nP]=bl_lcmv_scalar_v4(H,H_idx,mHref,RNcov,MCMV_idx,loc_flag);
+[~,nHscalar2,nori,nP]=bl_lcmv_scalar_v5(H,H_idx,mHref,RNcov,MCMV_idx,loc_flag);
 
 %% Residual maps
 cov_flag = 1;   % using Rinv for weights
@@ -386,8 +384,8 @@ SIA.nulled_ori = nulled_ori;
 
 
 function [nulled_wts,nulled_Hscalar,vx_ori]=calc_nulled_wts(H,mHref,RNcov,mref,loc_flag,mref_ori,cov_flag)
-% H_idx=1:size(H,3); [~,~,vx_ori,~]=bl_lcmv_scalar_v4(H,H_idx,[],RNcov,[],loc_flag);
-H_idx=1:size(H,3); [~,~,vx_ori,~]=bl_lcmv_scalar_v4(H,H_idx,mHref,RNcov,mref,loc_flag);
+% H_idx=1:size(H,3); [~,~,vx_ori,~]=bl_lcmv_scalar_v5(H,H_idx,[],RNcov,[],loc_flag);
+H_idx=1:size(H,3); [~,~,vx_ori,~]=bl_lcmv_scalar_v5(H,H_idx,mHref,RNcov,mref,loc_flag);
 if ~isempty(mref) && ~isempty(mref_ori)
     vx_ori(mref,:)=mref_ori; % replacing SPA_ori with SIA_ori
 end
